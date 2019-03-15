@@ -3,11 +3,10 @@
 
 #include "stdafx.h"
 #include "SignProjectTool.h"
-
 #define MAX_LOADSTRING 100
 
 // Глобальные переменные:
-HINSTANCE hInst;                                // текущий экземпляр
+//HINSTANCE hInst;                                // текущий экземпляр
 WCHAR szTitle[MAX_LOADSTRING];                  // Текст строки заголовка
 WCHAR szWindowClass[MAX_LOADSTRING];            // имя класса главного окна
 struct ProgrammSettings {
@@ -23,21 +22,28 @@ UINT CalcBItemWidth(HWND hLB, LPTSTR Text);
 UINT CalcBItemWidth(HWND hLB, PWSTR Text);
 #endif
 void InitRegistryStorage();
-void MessageError(TSTRING ErrorText, TSTRING ErrorCaption, HWND hWnd);
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
                      _In_ LPWSTR    lpCmdLine,
                      _In_ int       nCmdShow)
 {
     UNREFERENCED_PARAMETER(hPrevInstance);
-    UNREFERENCED_PARAMETER(lpCmdLine);
+	//Parse command line
 	PP.hInst = hInstance;
-	//DialogBox(hInst, MAKEINTRESOURCE(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc);
-	DialogBox(hInst, MAKEINTRESOURCE(IDD_ADD_FILES_FOR_CERTIFICATION), NULL, AddFilesForCertificationDlgProc);
+	WSTRINGARRAY CommandArray = BreakAStringIntoAnArrayOfStringsByCharacter(lpCmdLine, L' ');
+	size_t CommandArraySize = CommandArray.size();
+	for (size_t i = 0; i < CommandArraySize; i++) {
+		if (CommandArray[i] == L"--about") {
+			DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), NULL, About);
+			return NULL;
+		}
+		else if (CommandArray[i] == L"--startup-config") {
+			DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc);
+		}
+	}
+	if(DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc) == IDOK)DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_ADD_FILES_FOR_CERTIFICATION), NULL, AddFilesForCertificationDlgProc);
 	return NULL;
 }
-UINT CalculateTheLengthOfTheHorizontalScrollbarListBox(HWND hListBox);// функция пересчитывает размер горизонтального скролбара для LISTBOX
-
 //
 //  ФУНКЦИЯ: WndProc(HWND, UINT, WPARAM, LPARAM)
 //
@@ -55,9 +61,15 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     UNREFERENCED_PARAMETER(lParam);
     switch (message)
     {
-    case WM_INITDIALOG:
-        return (INT_PTR)TRUE;
-
+		case WM_INITDIALOG:{
+			HICON hDialogIcon = LoadIcon(PP.hInst, MAKEINTRESOURCE(IDI_SIGNPROJECTTOOL));
+			if (hDialogIcon == NULL)MessageError(_TEXT("Не удалось загрузить иконку для текущего диалога!"), _TEXT("Ошибка загрузки иконки!"), hDlg);
+			else {
+				SendMessage(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
+				SendMessage(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
+			}
+			return (INT_PTR)TRUE;
+		}
     case WM_COMMAND:
         if (LOWORD(wParam) == IDOK || LOWORD(wParam) == IDCANCEL)
         {
@@ -74,20 +86,44 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 	switch(message){
 		case WM_INITDIALOG:{
 			HICON hDialogIcon = LoadIcon(PP.hInst, MAKEINTRESOURCE(IDI_SIGNPROJECTTOOL));
-			SendMessage(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
-			SendMessage(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
+			if (hDialogIcon == NULL)MessageError(_TEXT("Не удалось загрузить иконку для текущего диалога!"), _TEXT("Ошибка загрузки иконки!"), hDlg);
+			else {
+				SendMessage(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
+				SendMessage(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
+			}
 			SendMessage(hCertStore, BM_SETCHECK, (WPARAM)BST_CHECKED, NULL);
+			//начало операции удаления ненужного пункта меню
+			HMENU hMainMenu = GetMenu(hDlg);//получения меню диалогового окна
+			if (hMainMenu != NULL) {//если прошло успешно
+				if (RemoveMenu(hMainMenu, IDM_STARTUPCONFIG, MF_BYCOMMAND) == NULL) {//то удаляем, если удаление завершилось неудачей
+					MessageError(_TEXT("Не удалось удалить пункт меню!"), _TEXT("Ошибка удаления пункта меню!"), NULL);//выводим соотвествующую ошибку
+					//начало процесса отключения пункта меню
+					MENUITEMINFO mi;//струтура с информацией о пунтке меню
+					ZeroMemory(&mi, sizeof(MENUITEMINFO));//обнуляем струткуру
+					mi.cbSize = sizeof(MENUITEMINFO);//размер данной струтуры
+					mi.fState = MFS_DISABLED;//свойство для отключения пунтка меню
+					mi.fMask = MIIM_STATE;//чтобы действовала группа свойств (в которой находится MFS_DISABLED)
+					if (SetMenuItemInfo(hMainMenu, IDM_STARTUPCONFIG, FALSE, &mi) == NULL)MessageError(_TEXT("Не удалось установить информацию о пункте меню!"), _TEXT("Ошибка установки информации о пункте меню!"), NULL);//отключаем, если неудача, то выводим ошибку
+				}
+			}
+			else MessageError(_TEXT("Не удалось получить меню диалога!"), _TEXT("Ошибка получения меню диалога!"), NULL);
 			EnableWindow(hOpenFile, FALSE);
 			return (INT_PTR)TRUE;
 		}
 		case WM_COMMAND:
 			switch (LOWORD(wParam)) {
+				case IDM_ABOUT:
+					DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hDlg, About);
+					break;
+				case IDM_EXIT:
+					EndDialog(hDlg, IDM_EXIT);
+					break;
 				case IDOK:
-					if (_tcscmp(szFile, _TEXT("")) == 0) {
-						MessageBox(hDlg, _TEXT("Вы не выбрали файл!"), _TEXT("Ошибка!"), MB_ICONERROR | MB_OK);
-						break;
-					}
-					EndDialog(hDlg, IDCANCEL);
+					//if (_tcscmp(szFile, _TEXT("")) == 0) {
+						//MessageBox(hDlg, _TEXT("Вы не выбрали файл!"), _TEXT("Ошибка!"), MB_ICONERROR | MB_OK);
+						//break;
+					//}
+					EndDialog(hDlg, IDOK);
 					return (INT_PTR)TRUE;
 				case IDCANCEL:
 					EndDialog(hDlg, IDCANCEL);
@@ -105,24 +141,7 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 					}
 					break;
 				case IDC_OPEN_FILE:{
-					OPENFILENAME ofn;       // структура станд. блока диалога
-					HANDLE hf;              // дескриптор файла
-					// Инициализация структуры OPENFILENAME
-					ZeroMemory(&ofn, sizeof(OPENFILENAME));
-					ofn.hInstance = PP.hInst;
-					ofn.lStructSize = sizeof(OPENFILENAME);
-					ofn.hwndOwner = hDlg;
-					ofn.lpstrFile = szFile;
-					//ofn.lpstrFile[0] = '\0';
-					ofn.nMaxFile = sizeof(szFile);
-					ofn.lpstrFilter = _TEXT("pfx файлы(.pfx)\0*.pfx\0\0");
-					ofn.nFilterIndex = 0;
-					ofn.lpstrFileTitle = NULL;
-					ofn.nMaxFileTitle = 0;
-					ofn.lpstrInitialDir = NULL;
-					ofn.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST;
-					// Показываем на экране диалоговое окно Открыть (Open).
-					GetOpenFileName(&ofn);
+					
 					break;
 				}
 				
@@ -131,23 +150,33 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 	}
 	return (INT_PTR)FALSE;
 }
-
+// Функция обработки сообщений диалога IDD_ADD_FILES_FOR_CERTIFICATION
 INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
 	HWND hListSelectedFilesForCertification = GetDlgItem(hDlg, IDC_LIST_SELECTED_FILES_FOR_CERTIFICTION), hDeleteFile = GetDlgItem(hDlg, IDC_DELETE_FILE), hModifyFile = GetDlgItem(hDlg, IDC_MODIFY_FILE), hSign = GetDlgItem(hDlg, IDC_SIGN), hClear = GetDlgItem(hDlg, IDC_CLEAR);
 	static UINT MaxStringWhidth = 0;//переменная характеризует максимально возможное значение, на которое можно прокрутить горизонтальный скролбар ListBox
 	switch (message) {
 		case WM_INITDIALOG:{
 			HICON hDialogIcon = LoadIcon(PP.hInst, MAKEINTRESOURCE(IDI_SIGNPROJECTTOOL));//загрузка иконки диалога из ресурсов
-			//установка иконки диалога
-			SendMessage(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
-			SendMessage(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
+			if (hDialogIcon == NULL)MessageError(_TEXT("Не удалось загрузить иконку для текущего диалога!"), _TEXT("Ошибка загрузки иконки!"), hDlg);
+			else {
+				//установка иконки диалога
+				SendMessage(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
+				SendMessage(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
+			}
 			return (INT_PTR)TRUE;
 		}
 		case WM_COMMAND:
 			switch (LOWORD(wParam)) {
+				case IDM_STARTUPCONFIG:
+					DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc);
+					break;
+				case IDM_ABOUT: //обработка пункта меню "О программе"
+					DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hDlg, About);
+					break;
 				case IDC_SIGN://обработка кнопки "Подписать"
 					EndDialog(hDlg, IDC_SIGN);
 					return (INT_PTR)TRUE;
+				case IDM_EXIT://обработка пункта меню "Выход"
 				case IDCANCEL://обработка кнопки "Выход"
 					EndDialog(hDlg, IDOK);
 					return (INT_PTR)TRUE;
@@ -177,54 +206,65 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 							//фильтр для *.exe, *.dll, *.lib, *.cab файлов
 							cmf[4].pszName = L"*.exe, *.dll, *.lib, *.cab файлы";
 							cmf[4].pszSpec = L"*.exe;*.dll;*.lib;*.cab";
-							hr = pFileOpen->SetFileTypes(sizeof(cmf)/sizeof(cmf[0]), cmf);
-							pFileOpen->SetTitle(_TEXT("Пожалуйста, выберите файлы для подписи"));
-							pFileOpen->SetOptions(FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_ALLOWMULTISELECT);
-							if (SUCCEEDED(hr)) {
-								hr = pFileOpen->Show(NULL);
-								// Get the file name from the dialog box.
+							hr = pFileOpen->SetFileTypes(sizeof(cmf) / sizeof(cmf[0]), cmf);
+							if (SUCCEEDED(hr)){
+								hr = pFileOpen->SetTitle(L"Пожалуйста, выберете файлы для цифровой подписи");
+								if (hr != S_OK)MessageError(_TEXT("Не удалось установить заголовок для диалогового окна открытия файлов!"), _TEXT("Ошибка установки заголовка!"), hDlg, hr);
+								hr = pFileOpen->SetOptions(FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | FOS_ALLOWMULTISELECT);
 								if (SUCCEEDED(hr)) {
-									IShellItemArray *pItem = nullptr;
-									hr = pFileOpen->GetResults(&pItem);
+									hr = pFileOpen->Show(hDlg);
+									// Get the file name from the dialog box.
 									if (SUCCEEDED(hr)) {
-										DWORD FilesCount = 0;
-										hr = pItem->GetCount(&FilesCount);
+										IShellItemArray *pItem = nullptr;
+										hr = pFileOpen->GetResults(&pItem);
 										if (SUCCEEDED(hr)) {
-											for (UINT i = 0; i < FilesCount; i++) {
-												IShellItem *MyFile = nullptr;
-												hr = pItem->GetItemAt(i, &MyFile);
-												if (SUCCEEDED(hr)) {
-													PWSTR pszFilePath;
-													hr = MyFile->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
-													// Display the file name to the user.
+											DWORD FilesCount = 0;
+											hr = pItem->GetCount(&FilesCount);
+											if (SUCCEEDED(hr)) {
+												for (DWORD i = 0; i < FilesCount; i++) {
+													IShellItem *MyFile = nullptr;
+													hr = pItem->GetItemAt(i, &MyFile);
 													if (SUCCEEDED(hr)) {
-														if (SendMessageW(hListSelectedFilesForCertification, LB_ADDSTRING, NULL, (WPARAM)pszFilePath) != LB_ERR) {
-															UINT Temp = CalcBItemWidth(hListSelectedFilesForCertification, pszFilePath);
-															if (Temp > MaxStringWhidth)MaxStringWhidth = Temp;
+														PWSTR pszFilePath;
+														hr = MyFile->GetDisplayName(SIGDN_FILESYSPATH, &pszFilePath);
+														// Display the file name to the user.
+														if (SUCCEEDED(hr)) {
+															if (SendMessageW(hListSelectedFilesForCertification, LB_ADDSTRING, NULL, (WPARAM)pszFilePath) != LB_ERR) {
+																UINT Temp = CalcBItemWidth(hListSelectedFilesForCertification, pszFilePath);
+																if (Temp > MaxStringWhidth)MaxStringWhidth = Temp;
+															}
+															else MessageError(_TEXT("Не удалось добавить файл!"), _TEXT("Ошибка добавления файла!"), hDlg);
+															CoTaskMemFree(pszFilePath);
 														}
-														else MessageError(_TEXT("Не удалось добавить файл!"), _TEXT("Ошибка добавления файла!"), hDlg);
-														CoTaskMemFree(pszFilePath);
+														else MessageError(_TEXT("Не удалось получить имя открытого вами файла, файл не будет добавлен!"), _TEXT("Ошибка получения имени открытого файла!"), hDlg, hr);
+														MyFile->Release();
 													}
-													MyFile->Release();
+													else MessageError(_TEXT("Не удалось получить один из открытых вами файлов, файл не будет добавлен!"), _TEXT("Ошибка получения открытого файла!"), hDlg, hr);
+												}
+												if (FilesCount > 0) {
+													SendMessage(hListSelectedFilesForCertification, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0);
+													EnableWindow(hDeleteFile, TRUE);
+													EnableWindow(hModifyFile, TRUE);
+													EnableWindow(hSign, TRUE);
+													EnableWindow(hClear, TRUE);
 												}
 											}
-											if (FilesCount > 0) {
-												SendMessage(hListSelectedFilesForCertification, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0);
-												EnableWindow(hDeleteFile, TRUE);
-												EnableWindow(hModifyFile, TRUE);
-												EnableWindow(hSign, TRUE);
-												EnableWindow(hClear, TRUE);
-											}
+											else MessageError(_TEXT("Не удалось получить количество открытых вами файлов!"), _TEXT("Ошибка получения кол-ва открытых файлов!"), hDlg, hr);
+											pItem->Release();
 										}
-										pItem->Release();
+										else MessageError(_TEXT("Не удалось получить открытые вами файлы!"), _TEXT("Ошибка получения открытых вами файлов!"), hDlg, hr);
 									}
-									//else MessageError(_TEXT("Не удалось получить выбранные файлы!"), _TEXT("Ошибка получения выбранных файлов!"), hDlg);
+									else MessageError(_TEXT("Не удалось показать диалоговое окно открытия файлов, дальнейшее открытие файлов невозможно!"), _TEXT("Ошибка показа диалогового окна!"), hDlg, hr);
+									pFileOpen->Release();
 								}
-								pFileOpen->Release();
+								else MessageError(_TEXT("Не удалось установить необходимые опции для файлового диалога, дальнейшее открытие файлов невозможно!"), _TEXT("Ощибка установки опций!"), hDlg, hr);
 							}
+							else MessageError(_TEXT("Не удалось установить фильтры допустимых файлов, невозможно добавить файлы!"), _TEXT("Ошибка установки фильтров для файлового диалога!"), hDlg, hr);
 						}
+						else MessageError(_TEXT("Не удалось создать объект CLSID_FileOpenDialog, дальнейшее открытие файлов невозможно!"), _TEXT("Ошибка создания объекта CLSID_FileOpenDialog!"), hDlg, hr);
 						CoUninitialize();
 					}
+					else MessageError(_TEXT("Не удалось инициализировать библиотеку COM!"), _TEXT("Ошибка инициализиции библиотеки COM!"), hDlg, hr);
 				}
 				case IDC_DELETE_FILE:{//обработки кнопки "Удалить"
 					LRESULT ItemsCount = SendMessage(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
@@ -317,25 +357,6 @@ UINT CalcBItemWidth(HWND hLB, PWSTR Text) {
 }
 #endif
 void InitRegistryStorage() {
-}
-void MessageError(TSTRING ErrorText, TSTRING ErrorCaption, HWND hWnd) {
-	DWORD RHKError = GetLastError();
-	LPTSTR BufferForFormatMessage = nullptr;
-	DWORD FMResult = FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, RHKError, LANG_SYSTEM_DEFAULT, (LPTSTR)&BufferForFormatMessage, NULL, nullptr);
-	if (FMResult == 0) {
-		MessageBox(hWnd, ErrorText.c_str(), ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
-		MessageBox(hWnd, _TEXT("Не удалось узнать возникновения предыдущей ошибки!"), _TEXT("Мне не удалось причину возникновения ошибки!"), MB_OK | MB_ICONERROR);
-	}
-	else {
-		MessageBox(hWnd, BufferForFormatMessage, ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
-	}
-	if (LocalFree((HLOCAL)BufferForFormatMessage) != 0) {
-		MessageBox(hWnd, _TEXT("Не удалось освободить буфуер при обработке предыдущей ошибки!"), _TEXT("Ошибка освобождения буфера!"), MB_OK | MB_ICONERROR);
-	}
-}
-UINT CalculateTheLengthOfTheHorizontalScrollbarListBox(HWND hListBox) {
-	//SendMessage(hListBox, LB_GETCOUNT);
-	return 0;
 }
 /*void CreateRegistryKey(TSTRING KeyName, HKEY hRootKey, ProgrammParameters *pp) {
 	if (KeyName == _TEXT("Settings")) {
