@@ -5,10 +5,18 @@ VisualStudioVersion = 15.0.28307.271
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "SignProjectTool", "SignProjectTool\SignProjectTool.vcxproj", "{0166E38B-A4D1-4F35-840D-D434D5287D7D}"
 	ProjectSection(ProjectDependencies) = postProject
+		{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D} = {D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}
 		{61389A1B-7CCF-48F9-A6D8-DA4C1C9473D4} = {61389A1B-7CCF-48F9-A6D8-DA4C1C9473D4}
 	EndProjectSection
 EndProject
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "WWS", "WWS\WWS.vcxproj", "{61389A1B-7CCF-48F9-A6D8-DA4C1C9473D4}"
+EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "BDL", "BDL\BDL.vcxproj", "{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{FDA1FE19-7F00-4708-A139-FE942A6D1F20}"
+	ProjectSection(SolutionItems) = preProject
+		types.h = types.h
+	EndProjectSection
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -34,6 +42,14 @@ Global
 		{61389A1B-7CCF-48F9-A6D8-DA4C1C9473D4}.Release|x64.Build.0 = Release|x64
 		{61389A1B-7CCF-48F9-A6D8-DA4C1C9473D4}.Release|x86.ActiveCfg = Release|Win32
 		{61389A1B-7CCF-48F9-A6D8-DA4C1C9473D4}.Release|x86.Build.0 = Release|Win32
+		{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}.Debug|x64.ActiveCfg = Debug|x64
+		{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}.Debug|x64.Build.0 = Debug|x64
+		{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}.Debug|x86.ActiveCfg = Debug|Win32
+		{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}.Debug|x86.Build.0 = Debug|Win32
+		{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}.Release|x64.ActiveCfg = Release|x64
+		{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}.Release|x64.Build.0 = Release|x64
+		{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}.Release|x86.ActiveCfg = Release|Win32
+		{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
