@@ -72,7 +72,8 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
-    <LinkKeyFile>"C:\Users\Давид\source\repos\certs\Blbulyan Software.pfx"</LinkKeyFile>
+    <LinkKeyFile>
+    </LinkKeyFile>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
@@ -96,6 +97,8 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(SolutionDir)$(Configuration)\WWS.lib;%(AdditionalDependencies);Crypt32.lib;Cryptui.lib</AdditionalDependencies>
+      <Version>
+      </Version>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
@@ -111,6 +114,8 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(SolutionDir)x64\$(Configuration)\WWS.lib;%(AdditionalDependencies);Crypt32.lib;Cryptui.lib</AdditionalDependencies>
+      <Version>
+      </Version>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
@@ -130,6 +135,8 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(SolutionDir)$(Configuration)\WWS.lib;%(AdditionalDependencies);Crypt32.lib;Cryptui.lib</AdditionalDependencies>
+      <Version>
+      </Version>
     </Link>
   </ItemDefinitionGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
@@ -149,6 +156,8 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalDependencies>$(SolutionDir)x64\$(Configuration)\WWS.lib;%(AdditionalDependencies);Crypt32.lib;Cryptui.lib</AdditionalDependencies>
+      <Version>
+      </Version>
     </Link>
   </ItemDefinitionGroup>
   <ItemGroup>

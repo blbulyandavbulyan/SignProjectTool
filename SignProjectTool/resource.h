@@ -22,6 +22,7 @@
 #define IDC_ADD_FILE                    1006
 #define IDC_DELETE_FILE                 1007
 #define IDC_PROGRESS1                   1008
+#define IDC_PORGRESS_SIGNING_FILES      1008
 #define IDC_MODIFY_FILE                 1009
 #define IDC_SIGN                        1010
 #define IDC_BUTTON2                     1012

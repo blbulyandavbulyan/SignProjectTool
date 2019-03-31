@@ -5,10 +5,11 @@
 #include "SignProjectTool.h"
 #define MAX_LOADSTRING 100
 //структура с основными параметрами программы
+using namespace WWS;
 struct ProgrammSettings {
 	HINSTANCE hInst;//экземпляр приложения
 	WSTRINGARRAY FilesForCertification;//список файлов для подписи
-	WSTRING CertificateFile;// файл сертификата для подписи им
+	WSTRING CertificateFile;// имя файла сертификата для подписи им
 	static const WSTRINGARRAY CommandLineValidArguments;//массив с допустимыми аргументами командной строки
 	bool CertificateInCertStore = false;//хранится ли сертификат, которым будут подписываться файлы в хранилище сертификатов (задаётся при начальной настройке программы
 	ALG_ID HashAlgorithmId = CALG_SHA_512;//алгоритм хеширования при подписи поумолчанию
@@ -19,75 +20,61 @@ const WSTRINGARRAY ProgrammSettings::CommandLineValidArguments = {
 		L"--input-files",
 		L"no-graphics"
 };
-struct LoadCetificateResult {
-	bool CertificateIsLoaded = false;
-	PCCERT_CONTEXT pCertContext;
-	WWS_ERROR_REPORT_STRUCTW ErrorInfo;
+struct LoadCertificateResult {//данную структуру возвращает функция LoadCertificate
+	bool CertificateIsLoaded = false;//сертификат был загружен
+	PCCERT_CONTEXT pCertContext = nullptr;//структура, содержащая загруженный сертификат
+	HCERTSTORE hCertStore = nullptr;
+	WWS_ERROR_REPORT_STRUCTW ErrorInfo;//в случае если сертификат не был загружен здесь содержится информация об ошибке
 };
-struct SIGN_FILES_RESULT {
-	/*ВНИМАНИЕ! ПОД ИМЕНЕМ ФАЙЛА ПОНИМАЕТСЯ ПОЛНЫЙ ПУТЬ К НЕМУ!*/
-	/*****************************************************************************************************************************
-	*	Общие сведения о работе функции SignFiles и о структуре SIGN_FILES_RESULT												 *
-	*	Функция SignFiles подписывает несколько файлов, она вызывает функцию PArrayIteratorProc 								 *
-	*	с целью получить структуру PITPROCRETURN, описывающую файл для подписи, которая содержит:								 *
-	*		Имя подписываемого файла																							 *
-	*		Дополнительные атрибуты для подписи(а так же информацию требуется ли их использовать								 *
-	*	Если функция успешно проинициализировалась, под успешной инициализацией понимается успешная загрузка DLL Mssign32.dll	 *
-	*	и успешное получение адреса функций: SignerSignEx и SignerFreeSignerContext, то функция PProgressProc будет вызываться	 *
-	*	каждый раз, когда требуется обновить информацию о подписанных и неподписанных файлов, сдвинуть условный ProgressBar,	 *
-	*	она будет вызываться даже в том случе, если файл неудалось подписать													 *
-	*	О членах структуры SIGN_FILES_RESULT смотрите в комментариях к её членам												 *
-	******************************************************************************************************************************/
-	WSTRINGARRAY SigningFiles;//список имён подписанных файлов
-	struct NO_SIGNING_FILE {//структура для массива с неподписанными файлами
-		WSTRING NoSigningFileName;//имя неподписанного файла
-		WWS_ERROR_REPORT_STRUCTW ErrorInfo;//подробная информация о причине его неподписи
-	};
-	struct PITPROCRETURN {//данную структуру должен возвращать итератор по именам подписываемых файлов 
-		WSTRING *SigningFileName;//имя подписываемого файла
+struct SIGN_FILE_RESULT {//данную структуру возвращает функция SignFile
+	struct SIGNING_FILE {//данная структура передаётся функции  SignFile в качестве параметра
+		PCCERT_CONTEXT SignCertificate = nullptr;
+		LPCWSTR SigningFileName;//имя подписываемого файла
 		ALG_ID HashAlgorithmId = PP.HashAlgorithmId;// алгоритм хеширования для цифровой подписи
 		DWORD dwAttrChoice = 0;//требуется ли использовать pAttrAuthcode
 		SIGNER_ATTR_AUTHCODE *pAttrAuthcode = nullptr;//дополнительные параметры для подписи
 	};
-	struct PProgressProcParameter {
-		bool FileIsSigned = false;
-		WWS_ERROR_REPORT_STRUCTW *ErrorInfo;
+	struct SIGN_FILE_INIT {//инициализационная струкутра для функции SignFile 
+		/*Премечание, нужно вызвать LoadLibrary(L"Mssign32.dll") и получить требуемые имена с помощью GetProcAddress*/
+		SignerSignType pfSignerSign = nullptr;//указатель на функцию SignerSignEx из Mssign32.dll
+		//SignerFreeSignerContextType pfSignerFreeSignerContext = nullptr;//указатель на функцию SignerFreeSignerContext из Mssign32.dll
 	};
-	std::vector<NO_SIGNING_FILE> NoSigningFiles;//список с неподписанными файлами и подробной информацией о их неподписи
-	typedef PITPROCRETURN(*PArrayIteratorProc)();//итератор по именам подписываемых файлов, возвращает структуру PITPROCRETURN
-	typedef void(*PProgressProc)(PProgressProcParameter &PPP);//функция, вызываемая в случае удачного или неудачного подписывания файла, с целью обновить информацию на условном ProgressBar
+	typedef const SIGN_FILE_INIT *PCSIGN_FILE_INIT;
+	typedef const SIGNING_FILE *PCSIGNING_FILE;
+	bool FileIsSigned = false;//файл был подписан
+	bool InitializationFailed = false;//была ли ошибка инициализации функции SignFile
 	WWS_ERROR_REPORT_STRUCTW ErrorInfo;//данный член будет заполнен в том случае, если не удастся инициализировать функцию SIGN_FILES_RESULT
 };
+typedef HLOCAL(*PFreeAlocatedBuffer)(HLOCAL Buffer);
 // Отправить объявления функций, включенных в этот модуль кода:
 INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 UINT CalcBItemWidth(HWND hLB, LPCTSTR Text);
-#ifndef _UNICODE
-UINT CalcBItemWidth(HWND hLB, PCWSTR Text);
-#endif
 WSTRINGARRAY OpenFiles(HWND hWnd, COMDLG_FILTERSPEC *cmf, UINT cmfSize, LPCWSTR TitleFileDialog, LPCWSTR OKButtonTitle, bool Multiselect);
-SIGN_FILES_RESULT SignFiles(SIGN_FILES_RESULT::PArrayIteratorProc PItProc, SIGN_FILES_RESULT::PProgressProc PProgProc, bool DNIIASAUF);
+SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SIGN_FILE_RESULT::PCSIGN_FILE_INIT SI);
+LoadCertificateResult LoadCertificate(HWND hWnd, const WSTRING *CertificateHref, bool LoadCertificateFromCertStore, LPCWSTR password);
 bool ThisStringIsProgrammArgument(WSTRING arg);
-void InitRegistryStorage();
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
                      _In_ LPWSTR    lpCmdLine,
                      _In_ int       nCmdShow)
 {
     UNREFERENCED_PARAMETER(hPrevInstance);
+	UNREFERENCED_PARAMETER(lpCmdLine);
+	UNREFERENCED_PARAMETER(nCmdShow);
 	//Parse command line
-	PP.hInst = hInstance;
+	/*PP.hInst = hInstance;
 	bool NoGraphicsMode = false;
 	WSTRINGARRAY CommandArray = BreakAStringIntoAnArrayOfStringsByCharacter(lpCmdLine, L' ');
 	size_t CommandArraySize = CommandArray.size();
 	for (size_t i = 0; i < CommandArraySize; i++) {
 		if (CommandArray[i] == L"--about") {
-			DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), NULL, About);
+			DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_ABOUTBOX), NULL, About);
 			return NULL;
 		}
 		else if (CommandArray[i] == L"--startup-config") {
-			DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc);
+			DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc);
 		}
 		else if (CommandArray[i] == L"--input-files") {
 			if (i != CommandArraySize - 1) {
@@ -102,7 +89,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 				}
 			}
 			else {
-				MessageBox(NULL, _TEXT("Недостаточно аргументов командной строки, возможно вы забыли указать список входных файлов!"), _TEXT("Ошибка аргументов командной строки!"), MB_ICONERROR | MB_OK);
+				MessageBoxW(NULL, L"Недостаточно аргументов командной строки, возможно вы забыли указать список входных файлов!", L"Ошибка аргументов командной строки!", MB_ICONERROR | MB_OK);
 				return -1;
 			}
 		}
@@ -115,67 +102,50 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 			MessageBoxW(NULL, ErrorMessage.c_str(), L"Неверный аргумент командной строки!", MB_ICONERROR | MB_OK);
 			return -1;
 		}
-	}
-	HMODULE hBDL = LoadLibrary(_TEXT("BDL.dll"));
-	if (hBDL != NULL) {
-		DLGPROC hEnterPasswordDlgProcA = (DLGPROC)GetProcAddress(hBDL, "EnterPasswordDlgProcA");
-		DLGPROC hEnterPasswordDlgProcW = (DLGPROC)GetProcAddress(hBDL, "EnterPasswordDlgProcW");
-		CHARVECTOR password;
-		WCHARVECTOR wpassword;
-		if (hEnterPasswordDlgProcA != NULL) {
-			BDL::EnterPasswordDlgInitParamA EPDIA;
-			EPDIA.Password = &password;
-			EPDIA.Caption = "Введите пароль от сертификата:";
-			EPDIA.EditPasswordCaption = "Пароль от сертификата";
-			EPDIA.HasToolTip = true;
-			EPDIA.ToolTipCaption[0] = "Показать пароль от сертификата";
-			EPDIA.ToolTipCaption[1] = "Скрыть пароль от сертификата";
-			EPDIA.OkButtonCaption = "Ввод";
-			EPDIA.CancelButtonCaption = "Выход";
-			EPDIA.PasswordChar = 'Ф';
-			EPDIA.hIconCaption = LoadIconA(PP.hInst, MAKEINTRESOURCEA(IDI_SIGNPROJECTTOOL));
-			if (EPDIA.hIconCaption == NULL)MessageError(_TEXT("Не удалось загрузить иконку для текущего диалога A!"), _TEXT("Ошибка загрузки иконки!"), NULL);
-			DialogBoxParamA(hBDL, MAKEINTRESOURCEA(IDDBDL_ENTERPASSWORD), NULL, hEnterPasswordDlgProcA, (LPARAM)&EPDIA);
-			MessageBoxA(NULL, password.data(), "Ваш пароль:", MB_OK | MB_ICONINFORMATION);
+	}*/
+	WSTRING FileHref = L"C:\\Users\\Давид\\source\\repos\\certs\\Blbulyan Software.pfx", FileForSigning = L"C:\\Users\\Давид\\Desktop\\TestedAplication.exe";
+	HMODULE hMssign32 = LoadLibrary(L"Mssign32.dll");
+	if (hMssign32 != NULL) {
+		SIGN_FILE_RESULT::SIGN_FILE_INIT SI;
+		SI.pfSignerSign = (SignerSignType)GetProcAddress(hMssign32, "SignerSign");
+		if (SI.pfSignerSign) {
+			SIGN_FILE_RESULT::SIGNING_FILE SF;
+			LoadCertificateResult LCR = LoadCertificate(NULL, &FileHref, false, L"pfxDav16Bb025");
+			if (LCR.CertificateIsLoaded) {
+				SF.SignCertificate = LCR.pCertContext;
+				SF.SigningFileName = FileForSigning.c_str();
+				SIGN_FILE_RESULT result = SignFile(&SF, &SI);
+				if (result.InitializationFailed) {
+					MessageBoxW(NULL, L"Ошибка инициализации функции SignFile, дальнейшую подпись файлов продолжить невозможно!", L"Ошибка инициализации функции SignFile", MB_OK | MB_ICONERROR);
+					MessageBoxW(NULL, result.ErrorInfo.ErrorString.c_str(), result.ErrorInfo.ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
+				}
+				if (!result.FileIsSigned) {
+					DWORD CountWriteChars = 0;
+					result.ErrorInfo.ErrorCaption += L"\n";
+					result.ErrorInfo.ErrorString += L"\n";
+					WSTRING OutputString = result.ErrorInfo.ErrorCaption + result.ErrorInfo.ErrorString;
+					OutputDebugStringW(OutputString.c_str());
+				}
+				else {
+					DWORD CountWriteChars = 0;
+					WSTRING OutputSigningFileInfo = L"Файл \"";
+					OutputSigningFileInfo += FileForSigning.c_str();
+					OutputSigningFileInfo += L"\" был успешно подписа\n";
+					OutputDebugStringW(OutputSigningFileInfo.c_str());
+				}
+
+				CertFreeCertificateContext(LCR.pCertContext);
+				CertCloseStore(LCR.hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
+			}
+			
 		}
-		else MessageError(_TEXT("Не удалось получить адресс функции EnterPasswordDlgProcA из библиотеки BDL.dll!"), _TEXT("Ошибка получения адресса функции!"), NULL);
-		if (hEnterPasswordDlgProcW != NULL) {
-			BDL::EnterPasswordDlgInitParamW EPDIW;
-			EPDIW.Password = &wpassword;
-			EPDIW.Caption = L"Введите пароль от сертификата:";
-			EPDIW.EditPasswordCaption = L"Пароль от сертификата";
-			EPDIW.HasToolTip = true;
-			EPDIW.ToolTipCaption[0] = L"Показать пароль от сертификата";
-			EPDIW.ToolTipCaption[1] = L"Скрыть пароль от сертификата";
-			EPDIW.OkButtonCaption = L"Ввод";
-			EPDIW.CancelButtonCaption = L"Выход";
-			EPDIW.PasswordChar = L'Ф';
-			EPDIW.hIconCaption = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
-			if (EPDIW.hIconCaption == NULL)MessageError(_TEXT("Не удалось загрузить иконку для текущего диалога W!"), _TEXT("Ошибка загрузки иконки!"), NULL);
-			DialogBoxParamW(hBDL, MAKEINTRESOURCEW(IDDBDL_ENTERPASSWORD), NULL, hEnterPasswordDlgProcW, (LPARAM)&EPDIW);
-			MessageBoxW(NULL, wpassword.data(), L"Ваш пароль:", MB_OK | MB_ICONINFORMATION);
-		}
-		else MessageError(_TEXT("Не удалось получить адресс функции EnterPasswordDlgProcW из библиотеки BDL.dll!"), _TEXT("Ошибка получения адресса функции!"), NULL);
-		FreeLibrary(hBDL);
+		else MessageError(L"Не удалось получить адрес функции SignerSign из Mssign32.dll, дальнейшее подписание файлов не возможно!", L"Ошибка получения адресса функции!", NULL);
+		FreeLibrary(hMssign32);
 	}
-	else MessageError(_TEXT("Не удалось загрузить библиотеку BDL.dll"), _TEXT("Ошибка загрузки DLL библиотеки!"), NULL);
-	// графический режим работы, в случае если графический режим отключен, данное диалоговое окно создаваться не будет
-	if(!NoGraphicsMode)DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_ADD_FILES_FOR_CERTIFICATION), NULL, AddFilesForCertificationDlgProc);
-	//цикл перебора и подписи файлов
-	
+	else MessageError(L"не удалось загрузить библиотеку Mssign32.dll", L"Ошибка загрузки библиотеки!", NULL);
 	
 	return NULL;
 }
-//
-//  ФУНКЦИЯ: WndProc(HWND, UINT, WPARAM, LPARAM)
-//
-//  ЦЕЛЬ: Обрабатывает сообщения в главном окне.
-//
-//  WM_COMMAND  - обработать меню приложения
-//  WM_PAINT    - Отрисовка главного окна
-//  WM_DESTROY  - отправить сообщение о выходе и вернуться
-//
-//
 
 // Обработчик сообщений для окна "О программе".
 INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
@@ -184,11 +154,11 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     switch (message)
     {
 		case WM_INITDIALOG:{
-			HICON hDialogIcon = LoadIcon(PP.hInst, MAKEINTRESOURCE(IDI_SIGNPROJECTTOOL));
-			if (hDialogIcon == NULL)MessageError(_TEXT("Не удалось загрузить иконку для текущего диалога!"), _TEXT("Ошибка загрузки иконки!"), hDlg);
+			HICON hDialogIcon = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
+			if (hDialogIcon == NULL)MessageError(L"Не удалось загрузить иконку для текущего диалога!", L"Ошибка загрузки иконки!", hDlg);
 			else {
-				SendMessage(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
-				SendMessage(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
+				SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
+				SendMessageW(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
 			}
 			return (INT_PTR)TRUE;
 		}
@@ -204,47 +174,45 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 }
 INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
 	HWND hCertStoreName = GetDlgItem(hDlg, IDC_CERT_STORE_NAME), hOpenFile = GetDlgItem(hDlg, IDC_OPEN_FILE), hCertFile = GetDlgItem(hDlg, IDC_CERT_FILE), hCertStore = GetDlgItem(hDlg, IDC_CERT_STORE);
-	static TCHAR szFile[MAX_PATH] = _TEXT("");// имя файла
+	static WSTRING CertificateFileName;
 	switch(message){
 		case WM_INITDIALOG:{
-			HICON hDialogIcon = LoadIcon(PP.hInst, MAKEINTRESOURCE(IDI_SIGNPROJECTTOOL));
-			if (hDialogIcon == NULL)MessageError(_TEXT("Не удалось загрузить иконку для текущего диалога!"), _TEXT("Ошибка загрузки иконки!"), hDlg);
+			CertificateFileName = PP.CertificateFile;
+			HICON hDialogIcon = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
+			if (hDialogIcon == NULL)MessageError(L"Не удалось загрузить иконку для текущего диалога!", L"Ошибка загрузки иконки!", hDlg);
 			else {
-				SendMessage(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
-				SendMessage(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
+				SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
+				SendMessageW(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
 			}
-			SendMessage(hCertStore, BM_SETCHECK, (WPARAM)BST_CHECKED, NULL);
+			SendMessageW(hCertStore, BM_SETCHECK, (WPARAM)BST_CHECKED, NULL);
 			//начало операции удаления ненужного пункта меню
 			HMENU hMainMenu = GetMenu(hDlg);//получения меню диалогового окна
 			if (hMainMenu != NULL) {//если прошло успешно
 				if (RemoveMenu(hMainMenu, IDM_STARTUPCONFIG, MF_BYCOMMAND) == NULL) {//то удаляем, если удаление завершилось неудачей
-					MessageError(_TEXT("Не удалось удалить пункт меню!"), _TEXT("Ошибка удаления пункта меню!"), NULL);//выводим соотвествующую ошибку
+					MessageError(L"Не удалось удалить пункт меню!", L"Ошибка удаления пункта меню!", NULL);//выводим соотвествующую ошибку
 					//начало процесса отключения пункта меню
-					MENUITEMINFO mi;//струтура с информацией о пунтке меню
-					ZeroMemory(&mi, sizeof(MENUITEMINFO));//обнуляем струткуру
-					mi.cbSize = sizeof(MENUITEMINFO);//размер данной струтуры
+					MENUITEMINFOW mi;//струтура с информацией о пунтке меню
+					ZeroMemory(&mi, sizeof(MENUITEMINFOW));//обнуляем струткуру
+					mi.cbSize = sizeof(MENUITEMINFOW);//размер данной струтуры
 					mi.fState = MFS_DISABLED;//свойство для отключения пунтка меню
 					mi.fMask = MIIM_STATE;//чтобы действовала группа свойств (в которой находится MFS_DISABLED)
-					if (SetMenuItemInfo(hMainMenu, IDM_STARTUPCONFIG, FALSE, &mi) == NULL)MessageError(_TEXT("Не удалось установить информацию о пункте меню!"), _TEXT("Ошибка установки информации о пункте меню!"), NULL);//отключаем, если неудача, то выводим ошибку
+					if (SetMenuItemInfoW(hMainMenu, IDM_STARTUPCONFIG, FALSE, &mi) == NULL)MessageError(L"Не удалось установить информацию о пункте меню!", L"Ошибка установки информации о пункте меню!", NULL);//отключаем, если неудача, то выводим ошибку
 				}
 			}
-			else MessageError(_TEXT("Не удалось получить меню диалога!"), _TEXT("Ошибка получения меню диалога!"), NULL);
+			else MessageError(L"Не удалось получить меню диалога!", L"Ошибка получения меню диалога!", NULL);
 			EnableWindow(hOpenFile, FALSE);
 			return (INT_PTR)TRUE;
 		}
 		case WM_COMMAND:
 			switch (LOWORD(wParam)) {
 				case IDM_ABOUT:
-					DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hDlg, About);
+					DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_ABOUTBOX), hDlg, About);
 					break;
 				case IDM_EXIT:
 					EndDialog(hDlg, IDM_EXIT);
 					break;
 				case IDOK:
-					//if (_tcscmp(szFile, _TEXT("")) == 0) {
-						//MessageBox(hDlg, _TEXT("Вы не выбрали файл!"), _TEXT("Ошибка!"), MB_ICONERROR | MB_OK);
-						//break;
-					//}
+					PP.CertificateFile = CertificateFileName;
 					EndDialog(hDlg, IDOK);
 					return (INT_PTR)TRUE;
 				case IDCANCEL:
@@ -263,8 +231,18 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 					}
 					break;
 				case IDC_OPEN_FILE:{
-					
-					break;
+					COMDLG_FILTERSPEC cmf[1] = {//массив с фильтрами
+						//фильтр для *.exe файлов
+						{
+							L"*.pfx файлы",
+							L"*.pfx"
+						}
+					};
+					WSTRINGARRAY CertificateFile = OpenFiles(hDlg, cmf, sizeof(cmf) / sizeof(COMDLG_FILTERSPEC), L"Загрузите сертификат для подписи", L"Загрузить", false);
+					if (CertificateFile.size() > 0) {
+						CertificateFileName = CertificateFile[0];
+					}
+					//break;
 				}
 				
 			}
@@ -278,26 +256,134 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 	static UINT MaxStringWhidth = 0;//переменная характеризует максимально возможное значение, на которое можно прокрутить горизонтальный скролбар ListBox
 	switch (message) {
 		case WM_INITDIALOG:{
-			HICON hDialogIcon = LoadIcon(PP.hInst, MAKEINTRESOURCE(IDI_SIGNPROJECTTOOL));//загрузка иконки диалога из ресурсов
-			if (hDialogIcon == NULL)MessageError(_TEXT("Не удалось загрузить иконку для текущего диалога!"), _TEXT("Ошибка загрузки иконки!"), hDlg);
+			HICON hDialogIcon = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));//загрузка иконки диалога из ресурсов
+			if (hDialogIcon == NULL)MessageError(L"Не удалось загрузить иконку для текущего диалога!", L"Ошибка загрузки иконки!", hDlg);
 			else {
 				//установка иконки диалога
-				SendMessage(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
-				SendMessage(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
+				SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
+				SendMessageW(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
 			}
 			return (INT_PTR)TRUE;
 		}
 		case WM_COMMAND:
 			switch (LOWORD(wParam)) {
 				case IDM_STARTUPCONFIG:
-					DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc);
+					DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc);
 					break;
 				case IDM_ABOUT: //обработка пункта меню "О программе"
-					DialogBox(PP.hInst, MAKEINTRESOURCE(IDD_ABOUTBOX), hDlg, About);
+					DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_ABOUTBOX), hDlg, About);
 					break;
-				case IDC_SIGN://обработка кнопки "Подписать"
-					EndDialog(hDlg, IDC_SIGN);
-					return (INT_PTR)TRUE;
+				case IDC_SIGN:{//обработка кнопки "Подписать"
+					LRESULT ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
+					if (ItemsCount != LB_ERR) {
+						//HMODULE hMssign32 = LoadLibrary(L"Mssign32.dll");
+						//if (hMssign32 != NULL) {
+							SIGN_FILE_RESULT::SIGN_FILE_INIT SI;
+							//SI.pfSignerSign = (SignerSignType)GetProcAddress(hMssign32, "SignerSign");'
+							//if (SI.pfSignerSign) {
+								//SI.pfSignerFreeSignerContext = (SignerFreeSignerContextType)GetProcAddress(hMssign32, "SignerFreeSignerContext");
+								//if (SI.pfSignerFreeSignerContext) {
+									BOOL ConsoleIsAlloced = AllocConsole();
+									HANDLE hOutputConsole = nullptr, hInputConsole = nullptr, hErrorConsole = nullptr;
+									if (ConsoleIsAlloced == NULL)MessageError(L"Не удалось выделить консоль, отчёты о подписанных и неподписанных файлах отображаться не будут!", L"Ошибка выделения консоли!", hDlg);
+									else {
+										hOutputConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+										hInputConsole = GetStdHandle(STD_INPUT_HANDLE);
+										hErrorConsole = GetStdHandle(STD_ERROR_HANDLE);
+										if ((hOutputConsole == NULL) || (hOutputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода информации о подписанных файлах!", L"Ошибка получения дескриптора консоли!", hDlg);
+										if ((hInputConsole == NULL) || (hInputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для ввода!", L"Ошибка получения дескриптора консоли!", hDlg);
+										if ((hErrorConsole == NULL) || (hErrorConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода ошибок о неподписанных файлов!", L"Ошибка получения дескриптора консоли!", hDlg);
+									}
+									HWND hProgressForSigningFiles = GetDlgItem(hDlg, IDC_PORGRESS_SIGNING_FILES);
+									EnableWindow(hProgressForSigningFiles, TRUE);
+									SIGN_FILE_RESULT::SIGNING_FILE SF;
+									LoadCertificateResult LCR = LoadCertificate(hDlg, &PP.CertificateFile, false, L"pfxDav16Bb025");
+									//for(int i = 0; i < 50000; i++)CertFreeCertificateContext(LCR.pCertContext);
+									if (LCR.CertificateIsLoaded) {
+										SF.SignCertificate = LCR.pCertContext;
+										SendMessageW(hProgressForSigningFiles, PBM_SETRANGE32, 0, ItemsCount);
+										SendMessageW(hProgressForSigningFiles, PBM_SETSTEP, (WPARAM)1, NULL);
+										for (LRESULT i = 0; i < ItemsCount; i++) {//цикл перебора строк 
+											WCHARVECTOR FileForSigning;// здесь будет хранится полученная строка из ListBox
+											LRESULT TextLen = SendMessageW(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
+											if (TextLen != LB_ERR) {// если не ошибка
+												FileForSigning.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
+												if (SendMessageW(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)FileForSigning.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
+													SF.SigningFileName = FileForSigning.data();
+													//SIGN_FILE_RESULT result = SignFile(&SF, &SI);
+													SIGN_FILE_RESULT result;
+													if (result.InitializationFailed) {
+														MessageBoxW(hDlg, L"Ошибка инициализации функции SignFile, дальнейшую подпись файлов продолжить невозможно!", L"Ошибка инициализации функции SignFile", MB_OK | MB_ICONERROR);
+														MessageBoxW(hDlg, result.ErrorInfo.ErrorString.c_str(), result.ErrorInfo.ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
+														if (ConsoleIsAlloced)FreeConsole();
+														break;
+													}
+													if (!result.FileIsSigned) {
+														DWORD CountWriteChars = 0;
+														result.ErrorInfo.ErrorCaption += L"\n";
+														result.ErrorInfo.ErrorString += L"\n";
+														if ((hErrorConsole != NULL) && (hErrorConsole != INVALID_HANDLE_VALUE)) {
+															WriteConsoleW(hErrorConsole, result.ErrorInfo.ErrorCaption.c_str(), result.ErrorInfo.ErrorCaption.size(), &CountWriteChars, NULL);
+															WriteConsoleW(hErrorConsole, result.ErrorInfo.ErrorString.c_str(), result.ErrorInfo.ErrorString.size(), &CountWriteChars, NULL);
+														}
+														#ifdef _DEBUG
+														else {
+															WSTRING OutputString = result.ErrorInfo.ErrorCaption + result.ErrorInfo.ErrorString;
+															OutputDebugStringW(OutputString.c_str());
+														}
+														#endif
+													}
+													else {
+														DWORD CountWriteChars = 0;
+														WSTRING OutputSigningFileInfo = L"Файл \"";
+														OutputSigningFileInfo += FileForSigning.data();
+														OutputSigningFileInfo += L"\" был успешно подписа\n";
+														if ((hOutputConsole != NULL) && (hOutputConsole != INVALID_HANDLE_VALUE))WriteConsoleW(hOutputConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL);
+														#ifdef _DEBUG
+														else OutputDebugStringW(OutputSigningFileInfo.c_str());
+														#endif
+													}
+													SendMessageW(hProgressForSigningFiles, PBM_STEPIT, 0, 0);
+												}
+												else {
+													//В случае ошибки получения имени файла
+													DWORD CountWriteChars = 0;
+													WSTRING OutputSigningFileInfo = L"Не получить имя файла под индексом ";
+													OutputSigningFileInfo += std::to_wstring(i);
+													OutputSigningFileInfo += L" в списке, файл не был подписан\n";
+													if ((hErrorConsole != NULL) && (hErrorConsole != INVALID_HANDLE_VALUE))WriteConsoleW(hErrorConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL);
+													#ifdef _DEBUG
+													else OutputDebugStringW(OutputSigningFileInfo.c_str());
+													#endif
+												}
+											}
+											else {
+												//В случае ошибки получения длинны
+												DWORD CountWriteChars = 0;
+												WSTRING OutputSigningFileInfo = L"Не получить длинну имени файла под индексом ";
+												OutputSigningFileInfo += std::to_wstring(i);
+												OutputSigningFileInfo += L" в списке, файл не был подписан\n";
+												if ((hErrorConsole != NULL) && (hErrorConsole != INVALID_HANDLE_VALUE))WriteConsoleW(hErrorConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL);
+												#ifdef _DEBUG
+												else OutputDebugStringW(OutputSigningFileInfo.c_str());
+												#endif
+											}
+										}
+										EnableWindow(hProgressForSigningFiles, FALSE);
+										if (ConsoleIsAlloced)FreeConsole();
+										CertFreeCertificateContext(LCR.pCertContext);
+									}
+								//else MessageError(L"Не удалось получить адрес функции SignerSignEx из Mssign32.dll, дальнейшее подписание файлов не возможно!", L"Ошибка получения адресса функции!", hDlg);
+							//}
+							//else MessageError(L"Не удалось получить адрес функции SignerFreeSignerContext из Mssign32.dll, дальнейшее подписание файлов не возможно!", L"Ошибка получения адресса функции!", hDlg);
+							//FreeLibrary(hMssign32);
+						//}
+						//else MessageError(L"Не удалось загрузить библиотеку Mssign32.dll!", L"Ошибка загрузки библиотеки!", hDlg);
+					}
+					else MessageError(L"Не удалось получить количество файлов в списке", L"Ошибка получения кол-ва файлов!", hDlg);//в случае ошибки получения кол-ва элементов
+					//return (INT_PTR)TRUE;
+					break;
+				}
 				case IDM_EXIT://обработка пункта меню "Выход"
 				case IDCANCEL://обработка кнопки "Выход"
 					EndDialog(hDlg, IDOK);
@@ -338,60 +424,60 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 								UINT Temp = CalcBItemWidth(hListSelectedFilesForCertification, OpenningFiles[i].c_str());
 								if (Temp > MaxStringWhidth)MaxStringWhidth = Temp;
 							}
-							else MessageError(_TEXT("Не удалось добавить файл!"), _TEXT("Ошибка добавления файла!"), hDlg);
+							else MessageError(L"Не удалось добавить файл!", L"Ошибка добавления файла!", hDlg);
 						}
-						SendMessage(hListSelectedFilesForCertification, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0);
+						SendMessageW(hListSelectedFilesForCertification, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0);
 						EnableWindow(hDeleteFile, TRUE);
 						EnableWindow(hModifyFile, TRUE);
-						EnableWindow(hSign, TRUE);
+						if (PP.CertificateFile != L"")EnableWindow(hSign, TRUE);
 						EnableWindow(hClear, TRUE);
 					}
 					break;
 				}
 				case IDC_DELETE_FILE:{//обработки кнопки "Удалить"
-					LRESULT ItemsCount = SendMessage(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
+					LRESULT ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
 					//данный код предназначен для точной проверки что всё работает правильно(ВНИМАНИЕ ЭТО ОТЛАДОЧНЫЙ КОД, В КОНЕЧНОМ ПРОЕКТЕ ОН ПРИСУТСВОВАТЬ НЕ БУДЕТ, ДЛЯ ТОГО ЧТО БЫ ЕГО НЕ БЫЛО В СОБРАННОЙ ПРОГРАММЕ СМЕНИТЕ КОНФИГУРАЦИЯ С Debug на Release)
 					#ifdef _DEBUG
-					OutputDebugString(_TEXT("Этап до удаления: \n"));
-					TSTRINGARRAY ListBoxItems, ListBoxSelectedItems;
+					OutputDebugStringW(L"Этап до удаления: \n");
+					WSTRINGARRAY ListBoxItems, ListBoxSelectedItems;
 					for (LRESULT i = 0; i < ItemsCount; i++) {
-						LRESULT ItemIsSelected = SendMessage(hListSelectedFilesForCertification, LB_GETSEL, (WPARAM)i, NULL);//получение информации о том, выбран ли элемент
+						LRESULT ItemIsSelected = SendMessageW(hListSelectedFilesForCertification, LB_GETSEL, (WPARAM)i, NULL);//получение информации о том, выбран ли элемент
 						if (ItemIsSelected > 0) {// если выбран
-							TCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
-							LRESULT TextLen = SendMessage(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
+							WCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
+							LRESULT TextLen = SendMessageW(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
 							if (TextLen != LB_ERR) {// если не ошибка
 								ListBoxString.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
-								if (SendMessage(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
+								if (SendMessageW(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
 									ListBoxSelectedItems.push_back(ListBoxString.data());
 									ListBoxItems.push_back(ListBoxString.data());
 								}
-								else MessageDebug(_TEXT("Не удалось получить текст выбранного элемента!"), _TEXT("Ошибка при получении текста выбранного элемента!"));//в случае неудачного получения текста элемента
+								else MessageDebug(L"Не удалось получить текст выбранного элемента!", L"Ошибка при получении текста выбранного элемента!");//в случае неудачного получения текста элемента
 							}
-							else MessageDebug(_TEXT("Не удалось узнать длинну текста выбранного элемента!"), _TEXT("Ошибка получения длинны выбранного элемента!"));//в случае неудачного получения длинны строки
+							else MessageDebug(L"Не удалось узнать длинну текста выбранного элемента!", L"Ошибка получения длинны выбранного элемента!");//в случае неудачного получения длинны строки
 						}
 						else if (ItemIsSelected == 0) {// если не выбран
-							TCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
-							LRESULT TextLen = SendMessage(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
+							WCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
+							LRESULT TextLen = SendMessageW(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
 							if (TextLen != LB_ERR) {// если не ошибка
 								ListBoxString.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
-								if (SendMessage(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
+								if (SendMessageW(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
 									ListBoxItems.push_back(ListBoxString.data());
 								}
-								else MessageDebug(_TEXT("Не удалось получить текст невыбранного элемента!"), _TEXT("Ошибка при получении текста невыбранного элемента!"));//в случае неудачного получения текста элемента
+								else MessageDebug(L"Не удалось получить текст невыбранного элемента!", L"Ошибка при получении текста невыбранного элемента!");//в случае неудачного получения текста элемента
 							}
-							else MessageDebug(_TEXT("Не удалось узнать длинну текста невыбранного элемента!"), _TEXT("Ошибка получения длинны невыбранного элемента!"));//в случае неудачного получения длинны строки
+							else MessageDebug(L"Не удалось узнать длинну текста невыбранного элемента!", L"Ошибка получения длинны невыбранного элемента!");//в случае неудачного получения длинны строки
 						}
-						else if (ItemIsSelected == LB_ERR)MessageDebug(_TEXT("Не удалось узнать выбран ли элемент"), _TEXT("Ошибка при распознавании выбранного элемента!"));//в случае ошибки проверки выбран ли элемент
+						else if (ItemIsSelected == LB_ERR)MessageDebug(L"Не удалось узнать выбран ли элемент", L"Ошибка при распознавании выбранного элемента!");//в случае ошибки проверки выбран ли элемент
 					}
-					OutputDebugString(_TEXT("Все элементы: \n"));
+					OutputDebugStringW(L"Все элементы: \n");
 					for (LRESULT i = 0; i < ListBoxItems.size(); i++) {
-						OutputDebugString(ListBoxItems[i].data());
-						OutputDebugString(_TEXT("\n"));
+						OutputDebugStringW(ListBoxItems[i].data());
+						OutputDebugStringW(L"\n");
 					}
-					OutputDebugString(_TEXT("Выбранные элементы: \n"));
+					OutputDebugStringW(L"Выбранные элементы: \n");
 					for (LRESULT i = 0; i < ListBoxSelectedItems.size(); i++) {
-						OutputDebugString(ListBoxSelectedItems[i].data());
-						OutputDebugString(_TEXT("\n"));
+						OutputDebugStringW(ListBoxSelectedItems[i].data());
+						OutputDebugStringW(L"\n");
 					}
 					#endif
 					///////////////////////////////////////////////////////////////////////////////////////////////
@@ -400,27 +486,27 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 					if (ItemsCount != LB_ERR) {//проверка на ошибку
 						MaxStringWhidth = 0;//обнуление длинны прокрутки горизонтального скролбара ListBox
 						for (LRESULT i = 0; i < ItemsCount; i++) {//цикл перебора строк 
-							LRESULT ItemIsSelected = SendMessage(hListSelectedFilesForCertification, LB_GETSEL, (WPARAM)i, NULL);//получение информации о том, выбран ли элемент
+							LRESULT ItemIsSelected = SendMessageW(hListSelectedFilesForCertification, LB_GETSEL, (WPARAM)i, NULL);//получение информации о том, выбран ли элемент
 							if (ItemIsSelected > 0) {// если выбран
-								if (SendMessage(hListSelectedFilesForCertification, LB_DELETESTRING, (WPARAM)i, NULL) != LB_ERR) {// и если не ошибка, то удаляем его
+								if (SendMessageW(hListSelectedFilesForCertification, LB_DELETESTRING, (WPARAM)i, NULL) != LB_ERR) {// и если не ошибка, то удаляем его
 									ItemsCount--; i--;// и уменьшаем итератор и кол-во элементов в списке
 								}
-								else MessageError(_TEXT("Не удалось удалить выбранный элемент из списка файлов!"), _TEXT("Ошибка удаления выбранного элемента!"), hDlg);// в случае ошибки
+								else MessageError(L"Не удалось удалить выбранный элемент из списка файлов!", L"Ошибка удаления выбранного элемента!", hDlg);// в случае ошибки
 							}
 							else if (ItemIsSelected == 0) {// если не выбран
-								TCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
-								LRESULT TextLen = SendMessage(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
+								WCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
+								LRESULT TextLen = SendMessageW(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
 								if (TextLen != LB_ERR) {// если не ошибка
 									ListBoxString.resize(TextLen+1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
-									if (SendMessage(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
+									if (SendMessageW(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
 										UINT Temp = CalcBItemWidth(hListSelectedFilesForCertification, ListBoxString.data());//пересчитываем длинну прокрутки горизонтального скролбара
 										if (Temp > MaxStringWhidth) MaxStringWhidth = Temp;//если она больше максимальной, то присваиваем её максимальной
 									}
-									else MessageError(_TEXT("Не удалось получить текст невыбранного элемента!"), _TEXT("Ошибка при получении текста невыбранного элемента!"), hDlg);//в случае неудачного получения текста элемента
+									else MessageError(L"Не удалось получить текст невыбранного элемента!", L"Ошибка при получении текста невыбранного элемента!", hDlg);//в случае неудачного получения текста элемента
 								}
-								else MessageError(_TEXT("Не удалось узнать длинну текста невыбранного элемента!"), _TEXT("Ошибка получения длинны невыбранного элемента!"), hDlg);//в случае неудачного получения длинны строки
+								else MessageError(L"Не удалось узнать длинну текста невыбранного элемента!", L"Ошибка получения длинны невыбранного элемента!", hDlg);//в случае неудачного получения длинны строки
 							}
-							else if (ItemIsSelected == LB_ERR)MessageError(_TEXT("Не удалось узнать выбран ли элемент"), _TEXT("Ошибка при распознавании выбранного элемента!"), hDlg);//в случае ошибки проверки выбран ли элемент
+							else if (ItemIsSelected == LB_ERR)MessageError(L"Не удалось узнать выбран ли элемент", L"Ошибка при распознавании выбранного элемента!", hDlg);//в случае ошибки проверки выбран ли элемент
 						}
 						if (ItemsCount == 0) {// если список стал пустым
 							//отключение всех органов управления, для которых требуется наличие хотя бы одного файла в списке
@@ -429,32 +515,32 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 							EnableWindow(hSign, FALSE);
 							EnableWindow(hClear, FALSE);
 						}
-						if (SendMessage(hListSelectedFilesForCertification, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(_TEXT("Не удалось установить прокручиваемую область!"), _TEXT("Ошибка установки прокручиваемой области!"), hDlg);//реинициализируем горизонтальный скролбар ListBox новым значением длинны прокрутки
+						if (SendMessageW(hListSelectedFilesForCertification, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);//реинициализируем горизонтальный скролбар ListBox новым значением длинны прокрутки
 					}
-					else MessageError(_TEXT("Не удалось получить количество элементов"), _TEXT("Ошибка получения количества элементов!"), hDlg);//в случае ошибки получения кол-ва элементов
+					else MessageError(L"Не удалось получить количество элементов", L"Ошибка получения количества элементов!", hDlg);//в случае ошибки получения кол-ва элементов
 					//начало нового отладочного блока, данный блок будет проверять все ли выбранные элементы были удалены и не были ли удалены лишние(невыбранные) элементы
 					#ifdef _DEBUG
-					OutputDebugString(_TEXT("Этап после удаления: \n"));
+					OutputDebugStringW(L"Этап после удаления: \n");
 					//начало блока для получения текущих элементов в списке
-					ItemsCount = SendMessage(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
-					TSTRINGARRAY ListBoxElementsLastModify;
+					ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
+					WSTRINGARRAY ListBoxElementsLastModify;
 					for (LRESULT i = 0; i < ItemsCount; i++) {
-						TCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
-						LRESULT TextLen = SendMessage(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
+						WCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
+						LRESULT TextLen = SendMessageW(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
 						if (TextLen != LB_ERR) {// если не ошибка
 							ListBoxString.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
-							if (SendMessage(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
+							if (SendMessageW(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
 								ListBoxElementsLastModify.push_back(ListBoxString.data());
 								
 							}
-							else MessageDebug(_TEXT("Не удалось получить текст элемента!"), _TEXT("Ошибка при получении текста элемента!"));//в случае неудачного получения текста элемента
+							else MessageDebug(L"Не удалось получить текст элемента!", L"Ошибка при получении текста элемента!");//в случае неудачного получения текста элемента
 						}
-						else MessageDebug(_TEXT("Не удалось узнать длинну текста элемента!"), _TEXT("Ошибка получения длинны элемента!"));//в случае неудачного получения длинны строки
+						else MessageDebug(L"Не удалось узнать длинну текста элемента!", L"Ошибка получения длинны элемента!");//в случае неудачного получения длинны строки
 					}
 					//конец блока получения текущих элементов в списке
 					//начало блока проверки 
-					auto ExistIdenticalElements = [](TSTRINGARRAY &a, TSTRINGARRAY &b)->TSTRINGARRAY {// данный функтор сравнивает два массива и формирует массив с элементами, существующими в обоих массивах
-						TSTRINGARRAY result;
+					auto ExistIdenticalElements = [](WSTRINGARRAY &a, WSTRINGARRAY &b)->WSTRINGARRAY {// данный функтор сравнивает два массива и формирует массив с элементами, существующими в обоих массивах
+						WSTRINGARRAY result;
 						for (LRESULT i = 0; i < a.size(); i++) {
 							for (LRESULT j = 0; j < b.size(); j++) {
 								if (a[i] == b[j])result.push_back(a[i].data());
@@ -462,7 +548,7 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 						}
 						return result;
 					};
-					auto IncorrectlyDeletedItems = [](TSTRINGARRAY &A, TSTRINGARRAY &B, TSTRINGARRAY &C)->TSTRINGARRAY{
+					auto IncorrectlyDeletedItems = [](WSTRINGARRAY &A, WSTRINGARRAY &B, WSTRINGARRAY &C)->WSTRINGARRAY{
 						//описание параметров:
 						//A - исходный массив
 						//B - массив с элементами, подлежащеми удалению
@@ -470,8 +556,8 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 						//данный функтор предназначен для проверки, праивльно ли пересечены A и B,
 						// из массивов A и B он формирует массив, такой что в нём содержаться только те элементы из A, которых нет в B, далее он сравнивает сформированный на предыдущем шаге массив с массивом C, 
 						//если эти массивы равны, то он возвращает пустой массив, если не равны, то он возвращает те элементы, которые должны быть в C(кроме тех, которые там уже есть)
-						TSTRINGARRAY Result, ArrayWithCorrectlyDeletedElements;
-						auto ElementIsExistInArray = [](const TSTRINGARRAY &Array, const TSTRING &element)->bool {
+						WSTRINGARRAY Result, ArrayWithCorrectlyDeletedElements;
+						auto ElementIsExistInArray = [](const WSTRINGARRAY &Array, const WSTRING &element)->bool {
 							for (size_t i = 0; i < Array.size(); i++) {
 								if (Array[i] == element)return true;
 							}
@@ -493,18 +579,18 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 
 						return Result;
 					};
-					TSTRING DebugOutputString = _TEXT("Значение списка после удаления: \n");
-					for (size_t i = 0; i < ListBoxElementsLastModify.size(); i++)DebugOutputString+=(ListBoxElementsLastModify[i]+_TEXT("\n"));
-					OutputDebugString(DebugOutputString.c_str());
+					WSTRING DebugOutputString = L"Значение списка после удаления: \n";
+					for (size_t i = 0; i < ListBoxElementsLastModify.size(); i++)DebugOutputString+=(ListBoxElementsLastModify[i]+L"\n");
+					OutputDebugStringW(DebugOutputString.c_str());
 					//ListBoxElementsLastModify.push_back(ListBoxSelectedItems[0]);
-					TSTRINGARRAY NotDeletedElements = ExistIdenticalElements(ListBoxElementsLastModify, ListBoxSelectedItems);
+					WSTRINGARRAY NotDeletedElements = ExistIdenticalElements(ListBoxElementsLastModify, ListBoxSelectedItems);
 					if (NotDeletedElements.size() > 0) {
-						DebugOutputString = _TEXT("В списке содержатся неудалённые элементы: \n");
-						for (size_t i = 0; i < NotDeletedElements.size(); i++)DebugOutputString += (NotDeletedElements[i] + _TEXT("\n"));
-						OutputDebugString(DebugOutputString.c_str());
+						DebugOutputString = L"В списке содержатся неудалённые элементы: \n";
+						for (size_t i = 0; i < NotDeletedElements.size(); i++)DebugOutputString += (NotDeletedElements[i] + L"\n");
+						OutputDebugStringW(DebugOutputString.c_str());
 					}
 					ListBoxElementsLastModify.pop_back();
-					TSTRINGARRAY InvalidDeletedElements = IncorrectlyDeletedItems(ListBoxItems, ListBoxSelectedItems, ListBoxElementsLastModify);
+					WSTRINGARRAY InvalidDeletedElements = IncorrectlyDeletedItems(ListBoxItems, ListBoxSelectedItems, ListBoxElementsLastModify);
 					if (InvalidDeletedElements.size() > 0) {
 						DebugBreak();
 					}
@@ -518,10 +604,10 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 					break;
 				}
 				case IDC_CLEAR://обработка кнопки "Очистить
-					if (SendMessage(hListSelectedFilesForCertification, LB_RESETCONTENT, NULL, NULL) == LB_ERR)MessageError(_TEXT("Не удалось очистить список!"), _TEXT("Ошибка очистки списка!"), hDlg);
+					if (SendMessageW(hListSelectedFilesForCertification, LB_RESETCONTENT, NULL, NULL) == LB_ERR)MessageError(L"Не удалось очистить список!", L"Ошибка очистки списка!", hDlg);
 					MaxStringWhidth = 0;//обнуление длинны прокрутки горизонтального скролбара ListBox
 					// "выключение" горизонтального скролбара
-					if (SendMessage(hListSelectedFilesForCertification, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(_TEXT("Не удалось установить прокручиваемую область!"), _TEXT("Ошибка установки прокручиваемой области!"), hDlg);
+					if (SendMessageW(hListSelectedFilesForCertification, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);
 					//отключение всех органов управления, для которых требуется наличие хотя бы одного файла в списке
 					EnableWindow(hDeleteFile, FALSE);
 					EnableWindow(hModifyFile, FALSE);
@@ -537,20 +623,6 @@ UINT CalcBItemWidth(HWND hLB, LPCTSTR Text) {
 	RECT r;
 	HDC hLBDC = GetDC(hLB);
 	HDC hDC = CreateCompatibleDC(hLBDC);
-	HFONT hFont = (HFONT)SendMessage(hLB, WM_GETFONT, 0, 0);
-	HGDIOBJ hOrgFont = SelectObject(hDC, hFont);
-	ZeroMemory(&r, sizeof(r));
-	DrawTextW(hDC, Text, -1, &r, DT_CALCRECT | DT_SINGLELINE | DT_NOCLIP);
-	SelectObject(hDC, hOrgFont);
-	DeleteDC(hDC);
-	ReleaseDC(hLB, hLBDC);
-	return (r.right - r.left) + (2 * GetSystemMetrics(SM_CXEDGE));
-}
-#ifndef _UNICODE
-UINT CalcBItemWidth(HWND hLB, const PCWSTR Text) {
-	RECT r;
-	HDC hLBDC = GetDC(hLB);
-	HDC hDC = CreateCompatibleDC(hLBDC);
 	HFONT hFont = (HFONT)SendMessageW(hLB, WM_GETFONT, 0, 0);
 	HGDIOBJ hOrgFont = SelectObject(hDC, hFont);
 	ZeroMemory(&r, sizeof(r));
@@ -560,7 +632,6 @@ UINT CalcBItemWidth(HWND hLB, const PCWSTR Text) {
 	ReleaseDC(hLB, hLBDC);
 	return (r.right - r.left) + (2 * GetSystemMetrics(SM_CXEDGE));
 }
-#endif
 WSTRINGARRAY OpenFiles(HWND hWnd, COMDLG_FILTERSPEC *cmf, UINT cmfSize, LPCWSTR TitleFileDialog, LPCWSTR OKButtonTitle, bool Multiselect) {
 	WSTRINGARRAY FilesNames;
 	HRESULT hr = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED |
@@ -575,9 +646,9 @@ WSTRINGARRAY OpenFiles(HWND hWnd, COMDLG_FILTERSPEC *cmf, UINT cmfSize, LPCWSTR 
 			hr = pFileOpen->SetFileTypes(cmfSize, cmf);
 			if (SUCCEEDED(hr)) {
 				hr = pFileOpen->SetTitle(TitleFileDialog);
-				if (hr != S_OK)MessageError(_TEXT("Не удалось установить заголовок для диалогового окна открытия файлов!"), _TEXT("Ошибка установки заголовка!"), hWnd, hr);
+				if (hr != S_OK)MessageError(L"Не удалось установить заголовок для диалогового окна открытия файлов!", L"Ошибка установки заголовка!", hWnd, hr);
 				hr = pFileOpen->SetOkButtonLabel(OKButtonTitle);
-				if (hr != S_OK)MessageError(_TEXT("Не удалось установить текст кнопки OK для диалогового окна открытия файлов!"), _TEXT("Ошибка установки текста кнопки OK!"), hWnd, hr);
+				if (hr != S_OK)MessageError(L"Не удалось установить текст кнопки OK для диалогового окна открытия файлов!", L"Ошибка установки текста кнопки OK!", hWnd, hr);
 				hr = pFileOpen->SetOptions(FOS_FILEMUSTEXIST | FOS_PATHMUSTEXIST | (Multiselect == TRUE ? FOS_ALLOWMULTISELECT : 0));
 				if (SUCCEEDED(hr)) {
 					hr = pFileOpen->Show(hWnd);
@@ -600,342 +671,155 @@ WSTRINGARRAY OpenFiles(HWND hWnd, COMDLG_FILTERSPEC *cmf, UINT cmfSize, LPCWSTR 
 											FilesNames.push_back(pszFilePath);
 											CoTaskMemFree(pszFilePath);
 										}
-										else MessageError(_TEXT("Не удалось получить имя открытого вами файла, файл не будет добавлен!"), _TEXT("Ошибка получения имени открытого файла!"), hWnd, hr);
+										else MessageError(L"Не удалось получить имя открытого вами файла, файл не будет добавлен!", L"Ошибка получения имени открытого файла!", hWnd, hr);
 										MyFile->Release();
 									}
-									else MessageError(_TEXT("Не удалось получить один из открытых вами файлов, файл не будет добавлен!"), _TEXT("Ошибка получения открытого файла!"), hWnd, hr);
+									else MessageError(L"Не удалось получить один из открытых вами файлов, файл не будет добавлен!", L"Ошибка получения открытого файла!", hWnd, hr);
 								}
 							}
-							else MessageError(_TEXT("Не удалось получить количество открытых вами файлов!"), _TEXT("Ошибка получения кол-ва открытых файлов!"), hWnd, hr);
+							else MessageError(L"Не удалось получить количество открытых вами файлов!", L"Ошибка получения кол-ва открытых файлов!", hWnd, hr);
 							pItem->Release();
 						}
-						else MessageError(_TEXT("Не удалось получить открытые вами файлы!"), _TEXT("Ошибка получения открытых вами файлов!"), hWnd, hr);
+						else MessageError(L"Не удалось получить открытые вами файлы!", L"Ошибка получения открытых вами файлов!", hWnd, hr);
 					}
-					else if (hr != HRESULT_FROM_WIN32(ERROR_CANCELLED)) MessageError(_TEXT("Не удалось показать диалоговое окно открытия файлов, дальнейшее открытие файлов невозможно!"), _TEXT("Ошибка показа диалогового окна!"), hWnd, hr);
+					else if (hr != HRESULT_FROM_WIN32(ERROR_CANCELLED)) MessageError(L"Не удалось показать диалоговое окно открытия файлов, дальнейшее открытие файлов невозможно!", L"Ошибка показа диалогового окна!", hWnd, hr);
 					pFileOpen->Release();
 				}
-				else MessageError(_TEXT("Не удалось установить необходимые опции для файлового диалога, дальнейшее открытие файлов невозможно!"), _TEXT("Ощибка установки опций!"), hWnd, hr);
+				else MessageError(L"Не удалось установить необходимые опции для файлового диалога, дальнейшее открытие файлов невозможно!", L"Ощибка установки опций!", hWnd, hr);
 			}
-			else MessageError(_TEXT("Не удалось установить фильтры допустимых файлов, невозможно добавить файлы!"), _TEXT("Ошибка установки фильтров для файлового диалога!"), hWnd, hr);
+			else MessageError(L"Не удалось установить фильтры допустимых файлов, невозможно добавить файлы!", L"Ошибка установки фильтров для файлового диалога!", hWnd, hr);
 		}
-		else MessageError(_TEXT("Не удалось создать объект CLSID_FileOpenDialog, дальнейшее открытие файлов невозможно!"), _TEXT("Ошибка создания объекта CLSID_FileOpenDialog!"), hWnd, hr);
+		else MessageError(L"Не удалось создать объект CLSID_FileOpenDialog, дальнейшее открытие файлов невозможно!", L"Ошибка создания объекта CLSID_FileOpenDialog!", hWnd, hr);
 		CoUninitialize();
 	}
-	else MessageError(_TEXT("Не удалось инициализировать библиотеку COM!"), _TEXT("Ошибка инициализиции библиотеки COM!"), hWnd, hr);
+	else MessageError(L"Не удалось инициализировать библиотеку COM!", L"Ошибка инициализиции библиотеки COM!", hWnd, hr);
 	return FilesNames;
 }
-LoadCetificateResult LoadCertificate(const WSTRING *CertificateHref, bool LoadCertificateFromCertStore) {
-	LoadCetificateResult LCR;
-	PCCERT_CONTEXT pCertContext = nullptr;
-	HCERTSTORE hCertStore = nullptr;
+LoadCertificateResult LoadCertificate(HWND hWnd, const WSTRING *CertificateHref, bool LoadCertificateFromCertStore, LPCWSTR password) {
+	LoadCertificateResult LCR;
 	if (PP.CertificateInCertStore) {
-		//процедура загрузки сертификата для подписи из хранилища
-		WSTRING CertSubject = L"", CertStoreName = L"";
-		for (size_t i = PP.CertificateFile.size() - 1; i >= 0; i--) {
-			if (CertificateHref->operator[](i) != L'/') {
-				CertSubject.push_back(CertificateHref->operator[](i));
-			}
-			else {
-				for (size_t j = (i != 0 ? i - 1 : i); j >= 0; j--) {
-					CertStoreName.push_back(CertificateHref->operator[](i));
-					if (j == 0)goto AndParseCertInCertStoreNameAndCertSubject;
-				}
-			}
-			if (i == 0)goto AndParseCertInCertStoreNameAndCertSubject;
-		}
-		AndParseCertInCertStoreNameAndCertSubject:
-		hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL, CERT_SYSTEM_STORE_CURRENT_USER, (void *)CertStoreName.c_str());
-		if (hCertStore) {
-			pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, (void *)CertSubject.c_str(), NULL);
-			if (!pCertContext) {
-				WSTRING ErrorText = L"Не удалось открыть сертификат \"" + CertSubject + L"\" из хранилища сертификатов сертификатов \"" + CertStoreName + L"\"!";
-				LCR.ErrorInfo = ErrorString(ErrorText.c_str());
-				LCR.ErrorInfo.ErrorCaption = L"Ошибка открытия сертификата!";
-				goto cleanup;
-			}
-		}
-		else {
-			WSTRING ErrorText = L"Не удалось открыть хранилище сертификатов \"" + CertStoreName + L"\" в котором должен был лежать сертификат для подписи!";
-			LCR.ErrorInfo = ErrorString(ErrorText.c_str());
-			LCR.ErrorInfo.ErrorCaption = L"Ошибка открытия хранилища сертификатов!";
-			goto cleanup;
-		}
+		
 	}
 	else {
-		//процедура загрузки сертификата для подписи из файла
-		CRYPTUI_WIZ_IMPORT_SRC_INFO GettingCertFromFile;
-		memset(&GettingCertFromFile, 0, sizeof(CRYPTUI_WIZ_IMPORT_SRC_INFO));
-		GettingCertFromFile.dwSize = sizeof(CRYPTUI_WIZ_IMPORT_SRC_INFO);
-		GettingCertFromFile.dwSubjectChoice = CRYPTUI_WIZ_IMPORT_SUBJECT_FILE;
-		GettingCertFromFile.pwszFileName = PP.CertificateFile.c_str();
-		GettingCertFromFile.pwszPassword = L"";
-		
-		GettingCertFromFile.dwFlags = CRYPT_EXPORTABLE | CRYPT_USER_PROTECTED;
-		if (CryptUIWizImport(CRYPTUI_WIZ_NO_UI, NULL, NULL, &GettingCertFromFile, NULL) != 0) {
-			LCR.pCertContext = GettingCertFromFile.pCertContext;
+		HANDLE hCertFile = CreateFileW((*CertificateHref).c_str(), GENERIC_READ, 0, nullptr, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, nullptr);
+		if (hCertFile != INVALID_HANDLE_VALUE) {
+			DWORD dwFileSize = GetFileSize(hCertFile, nullptr);
+			if (dwFileSize != INVALID_FILE_SIZE) {
+				HANDLE hCertMapping = CreateFileMappingW(hCertFile, nullptr, PAGE_READONLY, 0, 0, nullptr);
+				if (hCertMapping != nullptr) {
+					CRYPT_DATA_BLOB CertificateBlob;
+					CertificateBlob.cbData = dwFileSize;
+					CertificateBlob.pbData = (BYTE*)MapViewOfFile(hCertMapping, FILE_MAP_READ, 0, 0, dwFileSize);
+					if (CertificateBlob.pbData != nullptr) {
+						LCR.hCertStore = PFXImportCertStore(&CertificateBlob, password, PKCS12_NO_PERSIST_KEY);
+						if (LCR.hCertStore != NULL) {
+							LCR.pCertContext = CertFindCertificateInStore(LCR.hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_ANY, NULL, NULL);
+							if (LCR.pCertContext != nullptr)LCR.CertificateIsLoaded = true;
+							else {
+								WSTRING ErrorText = L"Не удалось получить загрузить сертификат \"" + (*CertificateHref) + L"\"!";
+								LCR.ErrorInfo = ErrorString(ErrorText.c_str());
+								LCR.ErrorInfo.ErrorCaption = L"Ошибка загрузки сертификата!";
+							}
+							//CertCloseStore(hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
+						}
+						UnmapViewOfFile(CertificateBlob.pbData);
+					}
+					else {
+						WSTRING ErrorText = L"Не удалось получить указатель на участок в памяти с отображением файла \"" + (*CertificateHref) + L"\"!";
+						LCR.ErrorInfo = ErrorString(ErrorText.c_str());
+						LCR.ErrorInfo.ErrorCaption = L"Ошибка получения указателя!";
+					}
+					CloseHandle(hCertMapping);
+				}
+				else {
+					WSTRING ErrorText = L"Не отобразить файл сертификата \"" + (*CertificateHref) + L"\" в память";
+					LCR.ErrorInfo = ErrorString(ErrorText.c_str());
+					LCR.ErrorInfo.ErrorCaption = L"Ошибка отображения файла в память!";
+				}
+			}
+			else {
+				WSTRING ErrorText = L"Не получить размер файла сертификата \"" + (*CertificateHref) + L"\"";
+				LCR.ErrorInfo = ErrorString(ErrorText.c_str());
+				LCR.ErrorInfo.ErrorCaption = L"Ошибка получения размера файла сертификата";
+			}
+			CloseHandle(hCertFile);
 		}
 		else {
-			WSTRING ErrorText = L"Не удалось загрузить сертификат для подписи из файла \"" + PP.CertificateFile + L"\"";
+			WSTRING ErrorText = L"Не удалось открыть файл сертификата \"" + (*CertificateHref) + L"\"";
 			LCR.ErrorInfo = ErrorString(ErrorText.c_str());
-			LCR.ErrorInfo.ErrorCaption = L"Ошибка загрузки сертификата для подписи из файла!";
-			goto cleanup;
+			LCR.ErrorInfo.ErrorCaption = L"Ошибка открытия файла!";
 		}
+		//if (pCertContext)CertFreeCertificateContext(pCertContext);
+		
+		
 	}
-	cleanup:
-	if (pCertContext)CertFreeCertificateContext(pCertContext);
-	if (hCertStore)CertCloseStore(hCertStore, CERT_CLOSE_STORE_CHECK_FLAG);
 	return LCR;
 }
 /*
-Данная функция подписывает файлы цифровым сертификатом, в качестве параметров она принимает:
-hWnd - дескриптор окна, которому будут принадлежать диалоговые окна, выводящиеся по мере необходимости
-PItProc - указатель на процедуру итератор(процедура итератор возвращает имя файла, она вызывается каждый раз, когда требуется следующее имя файла,
-	если больше не нужно подписывать файлы, функция должна вернуть пустую строку
-PProgProc - данная функция вызывается в том случае, если требуется изменить тот объект, который отображает прогресс выполненной операции,
-	она вызывается даже в том случае, если конретный файл не удалось подписать.
-DNIIASAUF - данная переменная говорит о том не нужно ли включать в возвращаемое значение фукнции SignFiles информацию о подписанных и неподписанных файлах, установите её в true
-если информацию о подписанных и неподписанных файлах не нужно включать в результат, в противном случае false
-Возвращаемое значение: 
-	возращает структуру SIGN_FILES_RESULT, в ней содержится список подписанных, неподписанных файлов (вместе с именами неподписанных файлов храняться так же причины их неподписи),
-	так же в этой структуре содержится информация о том успешно ли завершилась инициализация функции, подробности об этой структуре смотрите в комментариях к её определению
+	Данная функция подписывает файл сертификатом, она принимает
+		SF - указатель на структуру SIGN_FILE_RESULT::SIGNING_FILE, которая описывает подписываемый файл(подробности смотрите в объявлении этой структуры
+		SI - указатель на инициализационную структуру SIGN_FILE_RESULT::PCSIGN_FILE_INIT, подробности об этой структуре смотрите в комментариях к её определению
+	Считается, что данная функция успешно завершила инициализацию, если:
+		1)SI->pfSignerSign не равен nullptr и указывает на действительный адресс соответсвующей функции
+		2)SF->SignCertificate не равен nullptr и указывает на действительный адресс сертификата
 */
-
-SIGN_FILES_RESULT SignFiles(SIGN_FILES_RESULT::PArrayIteratorProc PItProc, SIGN_FILES_RESULT::PProgressProc PProgProc, bool DNIIASAUF) {
-	SIGN_FILES_RESULT result;
-	HMODULE hMssign32 = LoadLibrary(_TEXT("Mssign32.dll"));// загрузка необходимой для работы данной функции DLL
-	PCCERT_CONTEXT pCertContext = nullptr;
-	HCERTSTORE hCertStore = nullptr;
+SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SIGN_FILE_RESULT::PCSIGN_FILE_INIT SI) {
+	SIGN_FILE_RESULT result;
 	SIGNER_FILE_INFO signerFileInfo;
 	SIGNER_SUBJECT_INFO signerSubjectInfo;
 	SIGNER_CERT_STORE_INFO signerCertStoreInfo;
 	SIGNER_CERT signerCert;
 	SIGNER_SIGNATURE_INFO signerSignatureInfo;
-	SIGNER_CONTEXT * pSignerContext = NULL;
-	if (hMssign32) {
-		SignerFreeSignerContextType pfSignerFreeSignerContext = (SignerFreeSignerContextType)GetProcAddress(hMssign32, "SignerFreeSignerContext");
-		if (pfSignerFreeSignerContext) {
-			SignerSignExType pfSignerSignEx = (SignerSignExType)GetProcAddress(hMssign32, "SignerSignEx");
-			if (pfSignerSignEx) {
-				//начало реализации алгоритма цифровой подписи файлов
-				if (PP.CertificateInCertStore) {
-					//процедура загрузки сертификата для подписи из хранилища
-					WSTRING CertSubject = L"", CertStoreName = L"";
-					for (size_t i = PP.CertificateFile.size() - 1; i >= 0; i--) {
-						if (PP.CertificateFile[i] != L'/') {
-							CertSubject.push_back(PP.CertificateFile[i]);
-						}
-						else {
-							for (size_t j = (i != 0 ? i - 1 : i); j >= 0; j--) {
-								CertStoreName.push_back(PP.CertificateFile[i]);
-								if (j == 0)goto AndParseCertInCertStoreNameAndCertSubject;
-							}
-						}
-						if (i == 0)goto AndParseCertInCertStoreNameAndCertSubject;
-					}
-					AndParseCertInCertStoreNameAndCertSubject:
-					hCertStore = CertOpenStore(CERT_STORE_PROV_SYSTEM, 0, NULL, CERT_SYSTEM_STORE_CURRENT_USER, (void *)CertStoreName.c_str());
-					if (hCertStore) {
-						pCertContext = CertFindCertificateInStore(hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_SUBJECT_STR, (void *)CertSubject.c_str(), NULL);
-						if (!pCertContext) {
-							WSTRING ErrorText = L"Не удалось открыть сертификат \"" + CertSubject + L"\" из хранилища сертификатов сертификатов \"" + CertStoreName + L"\"!";
-							result.ErrorInfo = ErrorString(ErrorText.c_str());
-							result.ErrorInfo.ErrorCaption = L"Ошибка открытия сертификата!";
-							goto cleanup;
-						}
-					}
-					else {
-						WSTRING ErrorText = L"Не удалось открыть хранилище сертификатов \"" + CertStoreName + L"\" в котором должен был лежать сертификат для подписи!";
-						result.ErrorInfo = ErrorString(ErrorText.c_str());
-						result.ErrorInfo.ErrorCaption = L"Ошибка открытия хранилища сертификатов!";
-						goto cleanup;
-					}
-				}
-				else {
-					//процедура загрузки сертификата для подписи из файла
-					CRYPTUI_WIZ_IMPORT_SRC_INFO GettingCertFromFile;
-					memset(&GettingCertFromFile, 0, sizeof(CRYPTUI_WIZ_IMPORT_SRC_INFO));
-					GettingCertFromFile.dwSize = sizeof(CRYPTUI_WIZ_IMPORT_SRC_INFO);
-					GettingCertFromFile.dwSubjectChoice = CRYPTUI_WIZ_IMPORT_SUBJECT_FILE;
-					GettingCertFromFile.pwszFileName = PP.CertificateFile.c_str();
-					GettingCertFromFile.pwszPassword = L"";
-					GettingCertFromFile.dwFlags = CRYPT_EXPORTABLE | CRYPT_USER_PROTECTED;
-					if (CryptUIWizImport(CRYPTUI_WIZ_NO_UI, NULL, NULL, &GettingCertFromFile, NULL) != 0) {
-						pCertContext = GettingCertFromFile.pCertContext;
-					}
-					else {
-						WSTRING ErrorText = L"Не удалось загрузить сертификат для подписи из файла \"" + PP.CertificateFile + L"\"";
-						result.ErrorInfo = ErrorString(ErrorText.c_str());
-						result.ErrorInfo.ErrorCaption = L"Ошибка загрузки сертификата для подписи из файла!";
-						goto cleanup;
-					}
-				}
-				if (pCertContext != nullptr) {
-					signerFileInfo.cbSize = sizeof(SIGNER_FILE_INFO);
-					// Prepare SIGNER_SUBJECT_INFO struct
-					signerSubjectInfo.cbSize = sizeof(SIGNER_SUBJECT_INFO);
-					signerSubjectInfo.pdwIndex = NULL;
-					signerSubjectInfo.dwSubjectChoice = 1; // SIGNER_SUBJECT_FILE
-					signerSubjectInfo.pSignerFileInfo = &signerFileInfo;
-					// Prepare SIGNER_CERT_STORE_INFO struct
-					signerCertStoreInfo.cbSize = sizeof(SIGNER_CERT_STORE_INFO);
-					signerCertStoreInfo.pSigningCert = pCertContext;
-					signerCertStoreInfo.dwCertPolicy = 2; // SIGNER_CERT_POLICY_CHAIN
-					signerCertStoreInfo.hCertStore = NULL;
-					// Prepare SIGNER_CERT struct
-					signerCert.cbSize = sizeof(SIGNER_CERT);
-					signerCert.dwCertChoice = 2; // SIGNER_CERT_STORE
-					signerCert.pCertStoreInfo = &signerCertStoreInfo;
-					signerCert.hwnd = NULL;
-					// Prepare SIGNER_SIGNATURE_INFO struct
-					signerSignatureInfo.cbSize = sizeof(SIGNER_SIGNATURE_INFO);
-					signerSignatureInfo.algidHash = PP.HashAlgorithmId;
-					signerSignatureInfo.dwAttrChoice = 0; // SIGNER_NO_ATTR
-					signerSignatureInfo.pAttrAuthcode = NULL;
-					signerSignatureInfo.psAuthenticated = NULL;
-					signerSignatureInfo.psUnauthenticated = NULL;
-					signingalgbegin:
-					SIGN_FILES_RESULT::PITPROCRETURN PITResult = PItProc();//получение имени файла с помощью функции итератора, определяемой пользователем
-					if (*PITResult.SigningFileName != L"") {//если имя не пустое
-						HANDLE hFileForSigning = CreateFileW(PITResult.SigningFileName->c_str(), GENERIC_READ | GENERIC_WRITE, NULL, NULL, OPEN_EXISTING, FILE_ATTRIBUTE_NORMAL, NULL);//открываем файл для цифровой подписи
-						if (hFileForSigning) {
-							//процедура подписи файла сертификатом
-							signerFileInfo.pwszFileName = PITResult.SigningFileName->c_str();
-							signerFileInfo.hFile = hFileForSigning;
-							signerSignatureInfo.dwAttrChoice = PITResult.dwAttrChoice; // SIGNER_NO_ATTR
-							signerSignatureInfo.pAttrAuthcode = PITResult.pAttrAuthcode;
-							HRESULT hSignerSignResult = pfSignerSignEx(0, &signerSubjectInfo, &signerCert, &signerSignatureInfo, NULL, NULL, NULL, NULL, &pSignerContext);
-							if (SUCCEEDED(hSignerSignResult)) {
-								SIGN_FILES_RESULT::PProgressProcParameter ppp;
-								ppp.FileIsSigned = true;
-								PProgProc(ppp);
-								if (!DNIIASAUF)result.SigningFiles.push_back(*PITResult.SigningFileName);
-								pfSignerFreeSignerContext(pSignerContext);
-							}
-							else {
-								//в случае если неудалось подписать файл
-								WSTRING ErrorText = L"Не удалось подписать файл \"" + *PITResult.SigningFileName + L"\" цифровой подписью!";
-								WWS_ERROR_REPORT_STRUCTW ErrorInfo = ErrorString(ErrorText.c_str());
-								SIGN_FILES_RESULT::PProgressProcParameter ppp;
-								ErrorInfo.ErrorCaption = L"Не удалось подписать файл!";
-								ppp.ErrorInfo = &ErrorInfo;
-								PProgProc(ppp);
-								if (!DNIIASAUF) {
-									SIGN_FILES_RESULT::NO_SIGNING_FILE NSF;
-									NSF.ErrorInfo = ErrorInfo;
-									NSF.NoSigningFileName = *PITResult.SigningFileName;
-									result.NoSigningFiles.push_back(NSF);
-								}
-							}
-						}
-						else {
-							//в случае если не удалось открыть файл для подписи
-							SIGN_FILES_RESULT::NO_SIGNING_FILE NSF;
-							WSTRING ErrorText = L"Не удалось открыть файл \"" + *PITResult.SigningFileName + L"\" для цифровой подписи!";
-							WWS_ERROR_REPORT_STRUCTW ErrorInfo = ErrorString(ErrorText.c_str());
-							ErrorInfo.ErrorCaption = L"Не удалось открыть файл для подписи!";
-							SIGN_FILES_RESULT::PProgressProcParameter ppp;
-							ppp.ErrorInfo = &ErrorInfo;
-							PProgProc(ppp);
-							if (!DNIIASAUF) {
-								SIGN_FILES_RESULT::NO_SIGNING_FILE NSF;
-								NSF.ErrorInfo = ErrorInfo;
-								NSF.NoSigningFileName = *PITResult.SigningFileName;
-								result.NoSigningFiles.push_back(NSF);
-							}
-						}
-						goto signingalgbegin;
-					}
-				}
-				else {
-					result.ErrorInfo.ErrorString = L"Произошла неизвестная ошибка при попытке получения сертификата, указатель на сертификат всё ещё nullptr!";
-					result.ErrorInfo.ErrorCaption = L"Ошибка получения сертификата!";
-					goto cleanup;
-				}
-			}
-			else {
-				result.ErrorInfo = ErrorString(L"Не удалось получить адрес функции SignerSignEx, невозможно продолжить работу!");
-				result.ErrorInfo.ErrorCaption = L"Ошибка получения адреса функции!";
-				FreeLibrary(hMssign32);
-			}
+	if (SI->pfSignerSign) {
+		DWORD dwIndex = 0;
+		signerFileInfo.cbSize = sizeof(SIGNER_FILE_INFO);
+		signerFileInfo.pwszFileName = SF->SigningFileName;
+		signerFileInfo.hFile = NULL;
+		// Prepare SIGNER_SUBJECT_INFO struct
+		signerSubjectInfo.cbSize = sizeof(SIGNER_SUBJECT_INFO);
+		signerSubjectInfo.pdwIndex = &dwIndex;
+		signerSubjectInfo.dwSubjectChoice = 1; // SIGNER_SUBJECT_FILE
+		signerSubjectInfo.pSignerFileInfo = &signerFileInfo;
+		// Prepare SIGNER_CERT_STORE_INFO struct
+		signerCertStoreInfo.cbSize = sizeof(SIGNER_CERT_STORE_INFO);
+		signerCertStoreInfo.pSigningCert = SF->SignCertificate;
+		signerCertStoreInfo.dwCertPolicy = 2; // SIGNER_CERT_POLICY_CHAIN
+		signerCertStoreInfo.hCertStore = NULL;
+		// Prepare SIGNER_CERT struct
+		signerCert.cbSize = sizeof(SIGNER_CERT);
+		signerCert.dwCertChoice = 2; // SIGNER_CERT_STORE
+		signerCert.pCertStoreInfo = &signerCertStoreInfo;
+		signerCert.hwnd = NULL;
+		// Prepare SIGNER_SIGNATURE_INFO struct
+		signerSignatureInfo.cbSize = sizeof(SIGNER_SIGNATURE_INFO);
+		signerSignatureInfo.algidHash = CALG_SHA1;
+		signerSignatureInfo.psAuthenticated = NULL;
+		signerSignatureInfo.psUnauthenticated = NULL;
+		signerSignatureInfo.dwAttrChoice = NULL; // SIGNER_NO_ATTR
+		signerSignatureInfo.pAttrAuthcode = NULL;
+		HRESULT hSignerSignResult = SI->pfSignerSign(&signerSubjectInfo, &signerCert, &signerSignatureInfo, NULL, NULL, NULL, NULL);
+		if (SUCCEEDED(hSignerSignResult)) {
+			//SI->pfSignerFreeSignerContext(pSignerContext);
+			result.FileIsSigned = true;
 		}
 		else {
-			result.ErrorInfo = ErrorString(L"Не удалось получить адрес функции SignerFreeSignerContext, невозможно продолжить работу");
-			result.ErrorInfo.ErrorCaption = L"Ошибка получения адреса функции!";
-			FreeLibrary(hMssign32);
+			//в случае если неудалось подписать файл
+			WSTRING ErrorText = L"Не удалось подписать файл \"";
+			ErrorText += SF->SigningFileName;
+			ErrorText += L"\" цифровой подписью!";
+			result.ErrorInfo.ErrorString = ErrorString(ErrorText.c_str(), hSignerSignResult);
+			result.ErrorInfo.ErrorCaption = L"Ошибка подписи файла";
+			result.ErrorInfo.ErrorCode = hSignerSignResult;
 		}
 	}
 	else {
-		result.ErrorInfo = ErrorString(L"Не удалось загрузить библиотеку Mssign32.dll, невозможно продолжить работу!");
-		result.ErrorInfo.ErrorCaption = L"Ошибка загрузки бибилиотеки!";
+		result.ErrorInfo = ErrorString(L"Неверный адресс функции SignerSignEx, он не может равняться nullptr!");
+		result.ErrorInfo.ErrorCaption = L"Неверный адресс функции!";
+		result.InitializationFailed = true;
 	}
-	cleanup:
-	if (hMssign32)FreeLibrary(hMssign32);
-	if (pCertContext)CertFreeCertificateContext(pCertContext);
-	if (hCertStore)CertCloseStore(hCertStore, CERT_CLOSE_STORE_CHECK_FLAG);
 	return result;
 }
 bool ThisStringIsProgrammArgument(WSTRING arg) {
 	for (size_t i = 0; i < ProgrammSettings::CommandLineValidArguments.size(); i++)if (arg == ProgrammSettings::CommandLineValidArguments[i])return true;
 	return false;
 }
-void InitRegistryStorage() {
-}
-/*void CreateRegistryKey(TSTRING KeyName, HKEY hRootKey, ProgrammParameters *pp) {
-	if (KeyName == _TEXT("Settings")) {
-		DWORD lpwdDispositionFromSettingsKey = 0;
-		HKEY hRootSettings = 0;
-		LSTATUS CreateASettingsKeyStatus = RegCreateKeyEx(hRootKey, _TEXT("Settings"), NULL, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hRootSettings, &lpwdDispositionFromSettingsKey);// создание ветки реестра с общими настройками
-		if (CreateASettingsKeyStatus == ERROR_SUCCESS) {
-			LSTATUS CreateIntervalOfClicks = RegSetValueEx(hRootSettings, _TEXT("IntervalOfClicks"), NULL, REG_DWORD, (BYTE *)&pp->GlobalMiliSecondsOfClicks, sizeof(pp->GlobalMiliSecondsOfClicks));// создания переменной в реестре для хранения интервала кликов
-			if (CreateIntervalOfClicks != ERROR_SUCCESS) {
-				LPTSTR BufferForFormatMessage = nullptr;
-				DWORD FMResult = FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, CreateIntervalOfClicks, LANG_SYSTEM_DEFAULT, (LPTSTR)&BufferForFormatMessage, NULL, nullptr);
-				OutputDebugString(_TEXT("Не удалось создать параметр IntervalOfClicks в ветке реестра HKEY_CURRENT_USER\\SOFTWARE\\Blbulyan Software\\Autoclicker\\Settings\n"));
-				if (FMResult == 0) {
-					OutputDebugString(_TEXT("Мне не удалось причину возникновения ошибки!\n"));
-				}
-				else {
-					OutputDebugString(BufferForFormatMessage);
-				}
-				if (LocalFree((HLOCAL)BufferForFormatMessage) != 0) {
-					OutputDebugString(_TEXT("Не удалось освободить буфуер при обработке предыдущей ошибки!"));
-				}
-			}
-			LSTATUS CreateMouseButtonForClick = RegSetValueEx(hRootSettings, _TEXT("MouseButtonForClick"), NULL, REG_EXPAND_SZ, (BYTE *)_TEXT("LBTN"), sizeof(_TEXT("LBTN")) / sizeof(TCHAR));// создание переменной в реестре для хранения информации о том какой кнопкой мыши кликать
-			if (CreateMouseButtonForClick != ERROR_SUCCESS) {
-				LPTSTR BufferForFormatMessage = nullptr;
-				DWORD FMResult = FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, CreateIntervalOfClicks, LANG_SYSTEM_DEFAULT, (LPTSTR)&BufferForFormatMessage, NULL, nullptr);
-				OutputDebugString(_TEXT("Не удалось создать параметр MouseButtonForClick в ветке реестра HKEY_CURRENT_USER\\SOFTWARE\\Blbulyan Software\\Autoclicker\\Settings\n"));
-				if (FMResult == 0) {
-					OutputDebugString(_TEXT("Мне не удалось причину возникновения ошибки!\n"));
-				}
-				else {
-					OutputDebugString(BufferForFormatMessage);
-				}
-				if (LocalFree((HLOCAL)BufferForFormatMessage) != 0) {
-					OutputDebugString(_TEXT("Не удалось освободить буфуер при обработке предыдущей ошибки!"));
-				}
-			}
-			LSTATUS WhenStartingTheProgramMinimizeTheWindowToTray = RegSetValueEx(hRootSettings, _TEXT("WhenStartingTheProgramMinimizeTheWindowToTray"), NULL, REG_DWORD, (BYTE *)0, sizeof(UINT));// создание переменной в реестре которая отвечает за то, нужно ли сворачивать программу в трей при запуске, если значение равно 0 то не нужно, если больше нуля, то нужно
-			if (CreateMouseButtonForClick != ERROR_SUCCESS) {
-				LPTSTR BufferForFormatMessage = nullptr;
-				DWORD FMResult = FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER | FORMAT_MESSAGE_FROM_SYSTEM | FORMAT_MESSAGE_IGNORE_INSERTS, NULL, CreateIntervalOfClicks, LANG_SYSTEM_DEFAULT, (LPTSTR)&BufferForFormatMessage, NULL, nullptr);
-				OutputDebugString(_TEXT("Не удалось создать параметр MouseButtonForClick в ветке реестра HKEY_CURRENT_USER\\SOFTWARE\\Blbulyan Software\\Autoclicker\\Settings\n"));
-				if (FMResult == 0) {
-					OutputDebugString(_TEXT("Мне не удалось причину возникновения ошибки!\n"));
-				}
-				else {
-					OutputDebugString(BufferForFormatMessage);
-				}
-				if (LocalFree((HLOCAL)BufferForFormatMessage) != 0) {
-					OutputDebugString(_TEXT("Не удалось освободить буфуер при обработке предыдущей ошибки!"));
-				}
-			}
-		}
-	}
-	else if (KeyName == _TEXT("HotKey Settings")) {
-		DWORD lpwdDispositionFromHotKetSettingsKey = 0;
-		HKEY hRootHotKeySettings = 0;
-		LSTATUS CreateAHotKeySettingsKeyStatus = RegCreateKeyEx(hRootKey, _TEXT("HotKey Settings"), NULL, NULL, REG_OPTION_NON_VOLATILE, KEY_ALL_ACCESS, NULL, &hRootHotKeySettings, &lpwdDispositionFromHotKetSettingsKey);// создание ветки реестра с настройками горячих клавиш
-	}
-}*/

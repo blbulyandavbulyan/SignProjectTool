@@ -105,23 +105,18 @@ typedef struct _SIGNER_PROVIDER_INFO {
 		LPWSTR pwszKeyContainer;
 	};
 } SIGNER_PROVIDER_INFO, *PSIGNER_PROVIDER_INFO;
-
 typedef struct _SIGNER_CONTEXT {
 	DWORD cbSize;
 	DWORD cbBlob;
 	BYTE *pbBlob;
 } SIGNER_CONTEXT, *PSIGNER_CONTEXT;
-// необходимые функции для цифровой подписи файлов
-typedef HRESULT(WINAPI* SignerFreeSignerContextType)(__in  SIGNER_CONTEXT *pSignerContext);
-typedef HRESULT(WINAPI *SignerSignExType)(
-__in DWORD dwFlags,
-__in SIGNER_SUBJECT_INFO *pSubjectInfo,
-__in SIGNER_CERT *pSignerCert,
-__in SIGNER_SIGNATURE_INFO *pSignatureInfo,
-__in_opt SIGNER_PROVIDER_INFO *pProviderInfo,
-__in_opt LPCWSTR pwszHttpTimeStamp,
-__in_opt PCRYPT_ATTRIBUTES psRequest,
-__in_opt LPVOID pSipData,
-__out SIGNER_CONTEXT **ppSignerContext
-);
+//необходимые функции для цифровой подписи файлов
+typedef HRESULT(WINAPI *SignerSignType)(
+	_In_     SIGNER_SUBJECT_INFO   *pSubjectInfo,
+	_In_     SIGNER_CERT           *pSignerCert,
+	_In_     SIGNER_SIGNATURE_INFO *pSignatureInfo,
+	_In_opt_ SIGNER_PROVIDER_INFO  *pProviderInfo,
+	_In_opt_ LPCWSTR               pwszHttpTimeStamp,
+	_In_opt_ PCRYPT_ATTRIBUTES     psRequest,
+	_In_opt_ LPVOID                pSipData);
 // установите здесь ссылки на дополнительные заголовки, требующиеся для программы
