@@ -29,17 +29,11 @@ struct LoadCertificateResult {//данную структуру возвраща
 struct SIGN_FILE_RESULT {//данную структуру возвращает функция SignFile
 	struct SIGNING_FILE {//данная структура передаётся функции  SignFile в качестве параметра
 		PCCERT_CONTEXT SignCertificate = nullptr;
-		LPCWSTR SigningFileName;//имя подписываемого файла
+		LPCWSTR SigningFileName = nullptr;//имя подписываемого файла
 		ALG_ID HashAlgorithmId = PP.HashAlgorithmId;// алгоритм хеширования для цифровой подписи
 		DWORD dwAttrChoice = 0;//требуется ли использовать pAttrAuthcode
 		SIGNER_ATTR_AUTHCODE *pAttrAuthcode = nullptr;//дополнительные параметры для подписи
 	};
-	struct SIGN_FILE_INIT {//инициализационная струкутра для функции SignFile 
-		/*Премечание, нужно вызвать LoadLibrary(L"Mssign32.dll") и получить требуемые имена с помощью GetProcAddress*/
-		SignerSignType pfSignerSign = nullptr;//указатель на функцию SignerSignEx из Mssign32.dll
-		//SignerFreeSignerContextType pfSignerFreeSignerContext = nullptr;//указатель на функцию SignerFreeSignerContext из Mssign32.dll
-	};
-	typedef const SIGN_FILE_INIT *PCSIGN_FILE_INIT;
 	typedef const SIGNING_FILE *PCSIGNING_FILE;
 	bool FileIsSigned = false;//файл был подписан
 	bool InitializationFailed = false;//была ли ошибка инициализации функции SignFile
@@ -52,7 +46,7 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 UINT CalcBItemWidth(HWND hLB, LPCTSTR Text);
 WSTRINGARRAY OpenFiles(HWND hWnd, COMDLG_FILTERSPEC *cmf, UINT cmfSize, LPCWSTR TitleFileDialog, LPCWSTR OKButtonTitle, bool Multiselect);
-SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SIGN_FILE_RESULT::PCSIGN_FILE_INIT SI);
+SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SignerSignType pfSignerSign);
 LoadCertificateResult LoadCertificate(HWND hWnd, const WSTRING *CertificateHref, bool LoadCertificateFromCertStore, LPCWSTR password);
 bool ThisStringIsProgrammArgument(WSTRING arg);
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
@@ -64,7 +58,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	UNREFERENCED_PARAMETER(lpCmdLine);
 	UNREFERENCED_PARAMETER(nCmdShow);
 	//Parse command line
-	/*PP.hInst = hInstance;
+	PP.hInst = hInstance;
 	bool NoGraphicsMode = false;
 	WSTRINGARRAY CommandArray = BreakAStringIntoAnArrayOfStringsByCharacter(lpCmdLine, L' ');
 	size_t CommandArraySize = CommandArray.size();
@@ -102,47 +96,64 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 			MessageBoxW(NULL, ErrorMessage.c_str(), L"Неверный аргумент командной строки!", MB_ICONERROR | MB_OK);
 			return -1;
 		}
-	}*/
+	}
 	WSTRING FileHref = L"C:\\Users\\Давид\\source\\repos\\certs\\Blbulyan Software.pfx", FileForSigning = L"C:\\Users\\Давид\\Desktop\\TestedAplication.exe";
-	HMODULE hMssign32 = LoadLibrary(L"Mssign32.dll");
-	if (hMssign32 != NULL) {
-		SIGN_FILE_RESULT::SIGN_FILE_INIT SI;
-		SI.pfSignerSign = (SignerSignType)GetProcAddress(hMssign32, "SignerSign");
-		if (SI.pfSignerSign) {
-			SIGN_FILE_RESULT::SIGNING_FILE SF;
-			LoadCertificateResult LCR = LoadCertificate(NULL, &FileHref, false, L"pfxDav16Bb025");
-			if (LCR.CertificateIsLoaded) {
-				SF.SignCertificate = LCR.pCertContext;
-				SF.SigningFileName = FileForSigning.c_str();
-				SIGN_FILE_RESULT result = SignFile(&SF, &SI);
-				if (result.InitializationFailed) {
-					MessageBoxW(NULL, L"Ошибка инициализации функции SignFile, дальнейшую подпись файлов продолжить невозможно!", L"Ошибка инициализации функции SignFile", MB_OK | MB_ICONERROR);
-					MessageBoxW(NULL, result.ErrorInfo.ErrorString.c_str(), result.ErrorInfo.ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
-				}
-				if (!result.FileIsSigned) {
-					DWORD CountWriteChars = 0;
-					result.ErrorInfo.ErrorCaption += L"\n";
-					result.ErrorInfo.ErrorString += L"\n";
-					WSTRING OutputString = result.ErrorInfo.ErrorCaption + result.ErrorInfo.ErrorString;
-					OutputDebugStringW(OutputString.c_str());
-				}
-				else {
-					DWORD CountWriteChars = 0;
-					WSTRING OutputSigningFileInfo = L"Файл \"";
-					OutputSigningFileInfo += FileForSigning.c_str();
-					OutputSigningFileInfo += L"\" был успешно подписа\n";
-					OutputDebugStringW(OutputSigningFileInfo.c_str());
+	HMODULE hMssign32 = LoadLibrary(L"Mssign32.dll"), hBDL = LoadLibrary(L"BDL.dll");
+	if (hBDL != NULL) {
+		if (hMssign32 != NULL) {
+			SignerSignType pfSignerSign = (SignerSignType)GetProcAddress(hMssign32, "SignerSign");
+			if (pfSignerSign) {
+				SIGN_FILE_RESULT::SIGNING_FILE SF;
+				BDL::EnterPasswordDlgInitParamW EPD;
+				LPWSTR Password = nullptr;
+				EPD.Caption = L"Введите пароль от сертификата";
+				EPD.EditPasswordCaption = L"пароль от сертификата";
+				EPD.Password = &Password;
+				EPD.ToolTipCaption[0] = L"Показать пароль от сертификата";
+				EPD.ToolTipCaption[1] = L"Скрыть пароль от сертификата";
+				EPD.HasToolTip = true;
+				EPD.hIconCaption = LoadIcon(PP.hInst, MAKEINTRESOURCE(IDI_SIGNPROJECTTOOL));
+				DialogBoxParamW(hBDL, MAKEINTRESOURCE(IDDBDL_ENTERPASSWORD), NULL, BDL::EnterPasswordDlgProcW, (LPARAM)& EPD);
+				LoadCertificateResult LCR = LoadCertificate(NULL, &FileHref, false, Password);
+				SecureZeroMemory(Password, EPD.PasswordSize);
+				LocalFree(Password);
+				if (LCR.CertificateIsLoaded) {
+					SF.SignCertificate = LCR.pCertContext;
+					SF.SigningFileName = FileForSigning.c_str();
+					SIGN_FILE_RESULT result = SignFile(&SF, pfSignerSign);
+					if (result.InitializationFailed) {
+						MessageBoxW(NULL, L"Ошибка инициализации функции SignFile, дальнейшую подпись файлов продолжить невозможно!", L"Ошибка инициализации функции SignFile", MB_OK | MB_ICONERROR);
+						MessageBoxW(NULL, result.ErrorInfo.ErrorString.c_str(), result.ErrorInfo.ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
+					}
+					if (!result.FileIsSigned) {
+						DWORD CountWriteChars = 0;
+						result.ErrorInfo.ErrorCaption += L"\n";
+						result.ErrorInfo.ErrorString += L"\n";
+						WSTRING OutputString = result.ErrorInfo.ErrorCaption + result.ErrorInfo.ErrorString;
+						OutputDebugStringW(OutputString.c_str());
+					}
+					else {
+						DWORD CountWriteChars = 0;
+						WSTRING OutputSigningFileInfo = L"Файл \"";
+						OutputSigningFileInfo += FileForSigning.c_str();
+						OutputSigningFileInfo += L"\" был успешно подписа\n";
+						OutputDebugStringW(OutputSigningFileInfo.c_str());
+					}
+					CertFreeCertificateContext(LCR.pCertContext);
+					CertCloseStore(LCR.hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
 				}
 
-				CertFreeCertificateContext(LCR.pCertContext);
-				CertCloseStore(LCR.hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
 			}
-			
+			else MessageError(L"Не удалось получить адрес функции SignerSign из Mssign32.dll, дальнейшее подписание файлов не возможно!", L"Ошибка получения адресса функции!", NULL);
+			FreeLibrary(hMssign32);
 		}
-		else MessageError(L"Не удалось получить адрес функции SignerSign из Mssign32.dll, дальнейшее подписание файлов не возможно!", L"Ошибка получения адресса функции!", NULL);
-		FreeLibrary(hMssign32);
+		else MessageError(L"не удалось загрузить библиотеку Mssign32.dll", L"Ошибка загрузки библиотеки!", NULL);
+		FreeLibrary(hBDL);
 	}
-	else MessageError(L"не удалось загрузить библиотеку Mssign32.dll", L"Ошибка загрузки библиотеки!", NULL);
+	else {
+		MessageError(L"не удалось загрузить библиотеку BDL.dll!", L"Ошибка загрузки библиотеки!", NULL);
+		return FALSE;
+	}
 	
 	return NULL;
 }
@@ -276,29 +287,38 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 				case IDC_SIGN:{//обработка кнопки "Подписать"
 					LRESULT ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
 					if (ItemsCount != LB_ERR) {
-						//HMODULE hMssign32 = LoadLibrary(L"Mssign32.dll");
-						//if (hMssign32 != NULL) {
-							SIGN_FILE_RESULT::SIGN_FILE_INIT SI;
-							//SI.pfSignerSign = (SignerSignType)GetProcAddress(hMssign32, "SignerSign");'
-							//if (SI.pfSignerSign) {
-								//SI.pfSignerFreeSignerContext = (SignerFreeSignerContextType)GetProcAddress(hMssign32, "SignerFreeSignerContext");
-								//if (SI.pfSignerFreeSignerContext) {
-									BOOL ConsoleIsAlloced = AllocConsole();
-									HANDLE hOutputConsole = nullptr, hInputConsole = nullptr, hErrorConsole = nullptr;
-									if (ConsoleIsAlloced == NULL)MessageError(L"Не удалось выделить консоль, отчёты о подписанных и неподписанных файлах отображаться не будут!", L"Ошибка выделения консоли!", hDlg);
-									else {
-										hOutputConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-										hInputConsole = GetStdHandle(STD_INPUT_HANDLE);
-										hErrorConsole = GetStdHandle(STD_ERROR_HANDLE);
-										if ((hOutputConsole == NULL) || (hOutputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода информации о подписанных файлах!", L"Ошибка получения дескриптора консоли!", hDlg);
-										if ((hInputConsole == NULL) || (hInputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для ввода!", L"Ошибка получения дескриптора консоли!", hDlg);
-										if ((hErrorConsole == NULL) || (hErrorConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода ошибок о неподписанных файлов!", L"Ошибка получения дескриптора консоли!", hDlg);
-									}
+						BOOL ConsoleIsAlloced = AllocConsole();
+						HANDLE hOutputConsole = nullptr, hInputConsole = nullptr, hErrorConsole = nullptr;
+						if (ConsoleIsAlloced == NULL)MessageError(L"Не удалось выделить консоль, отчёты о подписанных и неподписанных файлах отображаться не будут!", L"Ошибка выделения консоли!", hDlg);
+						else {
+							hOutputConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+							hInputConsole = GetStdHandle(STD_INPUT_HANDLE);
+							hErrorConsole = GetStdHandle(STD_ERROR_HANDLE);
+							if ((hOutputConsole == NULL) || (hOutputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода информации о подписанных файлах!", L"Ошибка получения дескриптора консоли!", hDlg);
+							if ((hInputConsole == NULL) || (hInputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для ввода!", L"Ошибка получения дескриптора консоли!", hDlg);
+							if ((hErrorConsole == NULL) || (hErrorConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода ошибок о неподписанных файлов!", L"Ошибка получения дескриптора консоли!", hDlg);
+						}
+						HMODULE hBDL = LoadLibraryW(L"BDL.dll"), hMssign32 = LoadLibrary(L"Mssign32.dll");
+						if (hBDL) {
+							if (hMssign32 != NULL) {
+								SignerSignType pfSignerSign = (SignerSignType)GetProcAddress(hMssign32, "SignerSign");
+								if (pfSignerSign) {
 									HWND hProgressForSigningFiles = GetDlgItem(hDlg, IDC_PORGRESS_SIGNING_FILES);
 									EnableWindow(hProgressForSigningFiles, TRUE);
 									SIGN_FILE_RESULT::SIGNING_FILE SF;
-									LoadCertificateResult LCR = LoadCertificate(hDlg, &PP.CertificateFile, false, L"pfxDav16Bb025");
-									//for(int i = 0; i < 50000; i++)CertFreeCertificateContext(LCR.pCertContext);
+									BDL::EnterPasswordDlgInitParamW EPD;
+									LPWSTR Password = nullptr;
+									EPD.Caption = L"Введите пароль от сертификата";
+									EPD.EditPasswordCaption = L"пароль от сертификата";
+									EPD.Password = &Password;
+									EPD.ToolTipCaption[0] = L"Показать пароль от сертификата";
+									EPD.ToolTipCaption[1] = L"Скрыть пароль от сертификата";
+									EPD.HasToolTip = true;
+									EPD.hIconCaption = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
+									DialogBoxParamW(hBDL, MAKEINTRESOURCE(IDDBDL_ENTERPASSWORD), NULL, BDL::EnterPasswordDlgProcW, (LPARAM)& EPD);
+									LoadCertificateResult LCR = LoadCertificate(hDlg, &PP.CertificateFile, false, Password);
+									SecureZeroMemory(Password, EPD.PasswordSize);
+									LocalFree(Password);
 									if (LCR.CertificateIsLoaded) {
 										SF.SignCertificate = LCR.pCertContext;
 										SendMessageW(hProgressForSigningFiles, PBM_SETRANGE32, 0, ItemsCount);
@@ -310,8 +330,7 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 												FileForSigning.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
 												if (SendMessageW(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)FileForSigning.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
 													SF.SigningFileName = FileForSigning.data();
-													//SIGN_FILE_RESULT result = SignFile(&SF, &SI);
-													SIGN_FILE_RESULT result;
+													SIGN_FILE_RESULT result = SignFile(&SF, pfSignerSign);
 													if (result.InitializationFailed) {
 														MessageBoxW(hDlg, L"Ошибка инициализации функции SignFile, дальнейшую подпись файлов продолжить невозможно!", L"Ошибка инициализации функции SignFile", MB_OK | MB_ICONERROR);
 														MessageBoxW(hDlg, result.ErrorInfo.ErrorString.c_str(), result.ErrorInfo.ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
@@ -372,13 +391,17 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 										EnableWindow(hProgressForSigningFiles, FALSE);
 										if (ConsoleIsAlloced)FreeConsole();
 										CertFreeCertificateContext(LCR.pCertContext);
+										CertCloseStore(LCR.hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
 									}
-								//else MessageError(L"Не удалось получить адрес функции SignerSignEx из Mssign32.dll, дальнейшее подписание файлов не возможно!", L"Ошибка получения адресса функции!", hDlg);
-							//}
-							//else MessageError(L"Не удалось получить адрес функции SignerFreeSignerContext из Mssign32.dll, дальнейшее подписание файлов не возможно!", L"Ошибка получения адресса функции!", hDlg);
-							//FreeLibrary(hMssign32);
-						//}
-						//else MessageError(L"Не удалось загрузить библиотеку Mssign32.dll!", L"Ошибка загрузки библиотеки!", hDlg);
+								}
+								else MessageError(L"Не удалось получить адрес функции SignerSign из Mssign32.dll, дальнейшее подписание файлов не возможно!", L"Ошибка получения адресса функции!", NULL);
+								FreeLibrary(hMssign32);
+							}
+							else MessageError(L"не удалось загрузить библиотеку Mssign32.dll", L"Ошибка загрузки библиотеки!", NULL);
+							FreeLibrary(hBDL);
+						}
+						else MessageError(L"Не удалось загрузить библиотеку BDL.dll!", L"Ошибка загрузки библиотеки!", hDlg);
+						
 					}
 					else MessageError(L"Не удалось получить количество файлов в списке", L"Ошибка получения кол-ва файлов!", hDlg);//в случае ошибки получения кол-ва элементов
 					//return (INT_PTR)TRUE;
@@ -763,14 +786,14 @@ LoadCertificateResult LoadCertificate(HWND hWnd, const WSTRING *CertificateHref,
 		1)SI->pfSignerSign не равен nullptr и указывает на действительный адресс соответсвующей функции
 		2)SF->SignCertificate не равен nullptr и указывает на действительный адресс сертификата
 */
-SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SIGN_FILE_RESULT::PCSIGN_FILE_INIT SI) {
+SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SignerSignType pfSignerSign) {
 	SIGN_FILE_RESULT result;
 	SIGNER_FILE_INFO signerFileInfo;
 	SIGNER_SUBJECT_INFO signerSubjectInfo;
 	SIGNER_CERT_STORE_INFO signerCertStoreInfo;
 	SIGNER_CERT signerCert;
 	SIGNER_SIGNATURE_INFO signerSignatureInfo;
-	if (SI->pfSignerSign) {
+	if (pfSignerSign) {
 		DWORD dwIndex = 0;
 		signerFileInfo.cbSize = sizeof(SIGNER_FILE_INFO);
 		signerFileInfo.pwszFileName = SF->SigningFileName;
@@ -797,7 +820,7 @@ SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SIGN_FILE_RESULT:
 		signerSignatureInfo.psUnauthenticated = NULL;
 		signerSignatureInfo.dwAttrChoice = NULL; // SIGNER_NO_ATTR
 		signerSignatureInfo.pAttrAuthcode = NULL;
-		HRESULT hSignerSignResult = SI->pfSignerSign(&signerSubjectInfo, &signerCert, &signerSignatureInfo, NULL, NULL, NULL, NULL);
+		HRESULT hSignerSignResult = pfSignerSign(&signerSubjectInfo, &signerCert, &signerSignatureInfo, NULL, NULL, NULL, NULL);
 		if (SUCCEEDED(hSignerSignResult)) {
 			//SI->pfSignerFreeSignerContext(pSignerContext);
 			result.FileIsSigned = true;

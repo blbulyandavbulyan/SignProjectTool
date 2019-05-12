@@ -108,6 +108,7 @@ BDLDLL_API INT_PTR CALLBACK BDL::EnterPasswordDlgProcW(HWND hDlg, UINT message, 
 					size_t textlength = GetWindowTextLengthW(hEditPassword) + 1;
 					if (textlength > 0) {
 						*EPDI->Password = (LPWSTR)LocalAlloc(LPTR, sizeof(WCHAR)*textlength);
+						EPDI->PasswordSize = textlength;
 						GetWindowTextW(hEditPassword, *EPDI->Password, textlength);
 					}
 				}

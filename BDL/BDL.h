@@ -23,6 +23,7 @@ namespace BDL {
 namespace BDL {
 	typedef struct EnterPasswordDlgInitParamW {//структура инициализационных параметров для функции EnterPasswordDlgProcW
 		LPWSTR *Password = nullptr;//указатель на объект, в котором сохранится введённый пароль
+		size_t PasswordSize = 0;
 		LPCWSTR Caption = nullptr;//заголовок диалогового окна ввода пароля 
 		LPCWSTR EditPasswordCaption = nullptr;//подсказка, отображаемая в поле ввода пароля
 		LPCWSTR OkButtonCaption = nullptr;//текст, который отображается в кнопке IDОК выводимого диалога

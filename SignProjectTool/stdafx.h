@@ -19,6 +19,7 @@
 #include <memory.h>
 //Файлы заголовков проектных DLL
 #include "../WWS/WWS.h"
+#define BDL_ENABLE_PROTOTYPES
 #include "../BDL/BDL.h"
 #include "../types.h"
 #pragma comment(linker,"\"/manifestdependency:type='win32' \

@@ -2,7 +2,6 @@
 // Включаемый файл, созданный в Microsoft Visual C++.
 // Используется BDL.rc
 //
-#define BDL_EXPORTS                     1
 #define IDDBDL_ENTERPASSWORD            101
 #define IDI_EYE_VISIBLE                 103
 #define IDI_EYE_NOT_VISIBLE             104
