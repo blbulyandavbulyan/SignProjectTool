@@ -10,6 +10,7 @@ struct ProgrammSettings {
 	HINSTANCE hInst;//экземпляр приложения
 	WSTRINGARRAY FilesForCertification;//список файлов для подписи
 	WSTRING CertificateFile;// имя файла сертификата для подписи им
+	WSTRING HttpTimeStampServer;
 	static const WSTRINGARRAY CommandLineValidArguments;//массив с допустимыми аргументами командной строки
 	bool CertificateInCertStore = false;//хранится ли сертификат, которым будут подписываться файлы в хранилище сертификатов (задаётся при начальной настройке программы
 	ALG_ID HashAlgorithmId = CALG_SHA_512;//алгоритм хеширования при подписи поумолчанию
@@ -42,8 +43,9 @@ struct SIGN_FILE_RESULT {//данную структуру возвращает 
 typedef HLOCAL(*PFreeAlocatedBuffer)(HLOCAL Buffer);
 // Отправить объявления функций, включенных в этот модуль кода:
 INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
-INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
-INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);// процедура обработки сообщений диалога IDD_START_CONFIGURATION
+INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);// процедура обработки сообщений диалога IDD_ADD_FILES_FOR_CERTIFICATION
+INT_PTR CALLBACK SettingsTimeStampsServers(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);//процедура обработки сообщений диалога IDD_SETTINGS_TIMESTAMP_SERVERS
 UINT CalcBItemWidth(HWND hLB, LPCTSTR Text);
 WSTRINGARRAY OpenFiles(HWND hWnd, COMDLG_FILTERSPEC *cmf, UINT cmfSize, LPCWSTR TitleFileDialog, LPCWSTR OKButtonTitle, bool Multiselect);
 SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SignerSignType pfSignerSign);
@@ -208,7 +210,7 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     return (INT_PTR)FALSE;
 }
 INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
-	HWND hCertStoreName = GetDlgItem(hDlg, IDC_CERT_STORE_NAME), hOpenFile = GetDlgItem(hDlg, IDC_OPEN_FILE), hCertFile = GetDlgItem(hDlg, IDC_CERT_FILE), hCertStore = GetDlgItem(hDlg, IDC_CERT_STORE);
+	HWND hCertStoreName = GetDlgItem(hDlg, IDC_CERT_STORE_NAME), hOpenFile = GetDlgItem(hDlg, IDC_OPEN_FILE), hCertFile = GetDlgItem(hDlg, IDC_CERT_FILE), hCertStore = GetDlgItem(hDlg, IDC_CERT_STORE), hEditTimeStamp = GetDlgItem(hDlg, IDC_EDIT_TIMESTAMP);
 	static WSTRING CertificateFileName;
 	switch(message){
 		case WM_INITDIALOG:{
@@ -246,10 +248,22 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 				case IDM_EXIT:
 					EndDialog(hDlg, IDM_EXIT);
 					break;
-				case IDOK:
+				case IDOK: {
+					LRESULT HttpTimeStampLength = GetWindowTextLengthW(hEditTimeStamp) + 1;
+					if (HttpTimeStampLength > 0) {
+						WCHARVECTOR HttpTimeStamp;
+						HttpTimeStamp.resize(HttpTimeStampLength);
+						if (GetWindowTextW(hEditTimeStamp, HttpTimeStamp.data(), HttpTimeStampLength)) {
+
+						}
+					}
+					else {
+						PP.HttpTimeStampServer = L"";
+					}
 					PP.CertificateFile = CertificateFileName;
 					EndDialog(hDlg, IDOK);
-					return (INT_PTR)TRUE;
+					return (INT_PTR)TRUE; 
+				}
 				case IDCANCEL:
 					EndDialog(hDlg, IDCANCEL);
 					return (INT_PTR)TRUE;
@@ -277,7 +291,7 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 					if (CertificateFile.size() > 0) {
 						CertificateFileName = CertificateFile[0];
 					}
-					//break;
+					break;
 				}
 				
 			}
@@ -474,7 +488,7 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 					size_t OpenningFilesSize = OpenningFiles.size();
 					if (OpenningFilesSize > 0) {
 						for (size_t i = 0; i < OpenningFilesSize; i++) {
-							if (SendMessageW(hListSelectedFilesForCertification, LB_ADDSTRING, NULL, (WPARAM)OpenningFiles[i].c_str()) != LB_ERR) {
+							if (SendMessageW(hListSelectedFilesForCertification, LB_ADDSTRING, NULL, (LPARAM)OpenningFiles[i].c_str()) != LB_ERR) {
 								UINT Temp = CalcBItemWidth(hListSelectedFilesForCertification, OpenningFiles[i].c_str());
 								if (Temp > MaxStringWhidth)MaxStringWhidth = Temp;
 							}
@@ -490,53 +504,6 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 				}
 				case IDC_DELETE_FILE:{//обработки кнопки "Удалить"
 					LRESULT ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
-					//данный код предназначен для точной проверки что всё работает правильно(ВНИМАНИЕ ЭТО ОТЛАДОЧНЫЙ КОД, В КОНЕЧНОМ ПРОЕКТЕ ОН ПРИСУТСВОВАТЬ НЕ БУДЕТ, ДЛЯ ТОГО ЧТО БЫ ЕГО НЕ БЫЛО В СОБРАННОЙ ПРОГРАММЕ СМЕНИТЕ КОНФИГУРАЦИЯ С Debug на Release)
-					#ifdef _DEBUG
-					OutputDebugStringW(L"Этап до удаления: \n");
-					WSTRINGARRAY ListBoxItems, ListBoxSelectedItems;
-					for (LRESULT i = 0; i < ItemsCount; i++) {
-						LRESULT ItemIsSelected = SendMessageW(hListSelectedFilesForCertification, LB_GETSEL, (WPARAM)i, NULL);//получение информации о том, выбран ли элемент
-						if (ItemIsSelected > 0) {// если выбран
-							WCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
-							LRESULT TextLen = SendMessageW(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
-							if (TextLen != LB_ERR) {// если не ошибка
-								ListBoxString.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
-								if (SendMessageW(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
-									ListBoxSelectedItems.push_back(ListBoxString.data());
-									ListBoxItems.push_back(ListBoxString.data());
-								}
-								else MessageDebug(L"Не удалось получить текст выбранного элемента!", L"Ошибка при получении текста выбранного элемента!");//в случае неудачного получения текста элемента
-							}
-							else MessageDebug(L"Не удалось узнать длинну текста выбранного элемента!", L"Ошибка получения длинны выбранного элемента!");//в случае неудачного получения длинны строки
-						}
-						else if (ItemIsSelected == 0) {// если не выбран
-							WCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
-							LRESULT TextLen = SendMessageW(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
-							if (TextLen != LB_ERR) {// если не ошибка
-								ListBoxString.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
-								if (SendMessageW(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
-									ListBoxItems.push_back(ListBoxString.data());
-								}
-								else MessageDebug(L"Не удалось получить текст невыбранного элемента!", L"Ошибка при получении текста невыбранного элемента!");//в случае неудачного получения текста элемента
-							}
-							else MessageDebug(L"Не удалось узнать длинну текста невыбранного элемента!", L"Ошибка получения длинны невыбранного элемента!");//в случае неудачного получения длинны строки
-						}
-						else if (ItemIsSelected == LB_ERR)MessageDebug(L"Не удалось узнать выбран ли элемент", L"Ошибка при распознавании выбранного элемента!");//в случае ошибки проверки выбран ли элемент
-					}
-					OutputDebugStringW(L"Все элементы: \n");
-					for (LRESULT i = 0; i < ListBoxItems.size(); i++) {
-						OutputDebugStringW(ListBoxItems[i].data());
-						OutputDebugStringW(L"\n");
-					}
-					OutputDebugStringW(L"Выбранные элементы: \n");
-					for (LRESULT i = 0; i < ListBoxSelectedItems.size(); i++) {
-						OutputDebugStringW(ListBoxSelectedItems[i].data());
-						OutputDebugStringW(L"\n");
-					}
-					#endif
-					///////////////////////////////////////////////////////////////////////////////////////////////
-					//конец отладочного блока, дальше идёт обычной блок, выполняющий реализацию кнопки "Удалить"//
-					//////////////////////////////////////////////////////////////////////////////////////////////
 					if (ItemsCount != LB_ERR) {//проверка на ошибку
 						MaxStringWhidth = 0;//обнуление длинны прокрутки горизонтального скролбара ListBox
 						for (LRESULT i = 0; i < ItemsCount; i++) {//цикл перебора строк 
@@ -572,85 +539,6 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 						if (SendMessageW(hListSelectedFilesForCertification, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);//реинициализируем горизонтальный скролбар ListBox новым значением длинны прокрутки
 					}
 					else MessageError(L"Не удалось получить количество элементов", L"Ошибка получения количества элементов!", hDlg);//в случае ошибки получения кол-ва элементов
-					//начало нового отладочного блока, данный блок будет проверять все ли выбранные элементы были удалены и не были ли удалены лишние(невыбранные) элементы
-					#ifdef _DEBUG
-					OutputDebugStringW(L"Этап после удаления: \n");
-					//начало блока для получения текущих элементов в списке
-					ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
-					WSTRINGARRAY ListBoxElementsLastModify;
-					for (LRESULT i = 0; i < ItemsCount; i++) {
-						WCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
-						LRESULT TextLen = SendMessageW(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
-						if (TextLen != LB_ERR) {// если не ошибка
-							ListBoxString.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
-							if (SendMessageW(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
-								ListBoxElementsLastModify.push_back(ListBoxString.data());
-								
-							}
-							else MessageDebug(L"Не удалось получить текст элемента!", L"Ошибка при получении текста элемента!");//в случае неудачного получения текста элемента
-						}
-						else MessageDebug(L"Не удалось узнать длинну текста элемента!", L"Ошибка получения длинны элемента!");//в случае неудачного получения длинны строки
-					}
-					//конец блока получения текущих элементов в списке
-					//начало блока проверки 
-					auto ExistIdenticalElements = [](WSTRINGARRAY &a, WSTRINGARRAY &b)->WSTRINGARRAY {// данный функтор сравнивает два массива и формирует массив с элементами, существующими в обоих массивах
-						WSTRINGARRAY result;
-						for (LRESULT i = 0; i < a.size(); i++) {
-							for (LRESULT j = 0; j < b.size(); j++) {
-								if (a[i] == b[j])result.push_back(a[i].data());
-							}
-						}
-						return result;
-					};
-					auto IncorrectlyDeletedItems = [](WSTRINGARRAY &A, WSTRINGARRAY &B, WSTRINGARRAY &C)->WSTRINGARRAY{
-						//описание параметров:
-						//A - исходный массив
-						//B - массив с элементами, подлежащеми удалению
-						//C - массив с дополнением A до B, требующий проверки, сформированный другим кодом 
-						//данный функтор предназначен для проверки, праивльно ли пересечены A и B,
-						// из массивов A и B он формирует массив, такой что в нём содержаться только те элементы из A, которых нет в B, далее он сравнивает сформированный на предыдущем шаге массив с массивом C, 
-						//если эти массивы равны, то он возвращает пустой массив, если не равны, то он возвращает те элементы, которые должны быть в C(кроме тех, которые там уже есть)
-						WSTRINGARRAY Result, ArrayWithCorrectlyDeletedElements;
-						auto ElementIsExistInArray = [](const WSTRINGARRAY &Array, const WSTRING &element)->bool {
-							for (size_t i = 0; i < Array.size(); i++) {
-								if (Array[i] == element)return true;
-							}
-							return false;
-						};
-						for (LRESULT i = 0; i < A.size(); i++) {
-							if (!ElementIsExistInArray(B, A[i])) {
-								ArrayWithCorrectlyDeletedElements.push_back(A[i]);
-							}
-						}
-						if (C != ArrayWithCorrectlyDeletedElements) {
-							//DebugBreak();
-							for (LRESULT i = 0; i < ArrayWithCorrectlyDeletedElements.size(); i++) {
-								if (!ElementIsExistInArray(C, ArrayWithCorrectlyDeletedElements[i])) {
-									Result.push_back(A[i]);
-								}
-							}
-						}
-
-						return Result;
-					};
-					WSTRING DebugOutputString = L"Значение списка после удаления: \n";
-					for (size_t i = 0; i < ListBoxElementsLastModify.size(); i++)DebugOutputString+=(ListBoxElementsLastModify[i]+L"\n");
-					OutputDebugStringW(DebugOutputString.c_str());
-					//ListBoxElementsLastModify.push_back(ListBoxSelectedItems[0]);
-					WSTRINGARRAY NotDeletedElements = ExistIdenticalElements(ListBoxElementsLastModify, ListBoxSelectedItems);
-					if (NotDeletedElements.size() > 0) {
-						DebugOutputString = L"В списке содержатся неудалённые элементы: \n";
-						for (size_t i = 0; i < NotDeletedElements.size(); i++)DebugOutputString += (NotDeletedElements[i] + L"\n");
-						OutputDebugStringW(DebugOutputString.c_str());
-					}
-					ListBoxElementsLastModify.pop_back();
-					WSTRINGARRAY InvalidDeletedElements = IncorrectlyDeletedItems(ListBoxItems, ListBoxSelectedItems, ListBoxElementsLastModify);
-					if (InvalidDeletedElements.size() > 0) {
-						DebugBreak();
-					}
-					//конец блока проверки
-					#endif
-					//конец отладочного блока
 					break;
 				} 
 				case IDC_MODIFY_FILE:{ //обработка кнопки "Изменить"
@@ -669,6 +557,126 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 					EnableWindow(hClear, FALSE);
 					break;
 			}
+	}
+	return (INT_PTR)FALSE;
+}
+
+INT_PTR CALLBACK SettingsTimeStampsServers(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam){
+	HWND hClearInput = GetDlgItem(hDlg, IDC_CLEAR_INPUT), hAddTimeStampServer = GetDlgItem(hDlg, IDC_ADD_TIMESTAMP_SERVER), hDeleteTimeStampServer = GetDlgItem(hDlg, IDC_DELETE_TIMESTAMP_SERVER), hClearTimeStampServers = GetDlgItem(hDlg, IDC_CLEAR_TIMESTAMP_SERVERS), hListTimeStampServers = GetDlgItem(hDlg, IDC_LIST_TIMESTAMP_SERVERS), hEditTimeStampServer = GetDlgItem(hDlg, IDC_EDIT_TIMESTAMP_SERVER);
+	static UINT MaxStringWhidth = 0;//переменная характеризует максимально возможное значение, на которое можно прокрутить горизонтальный скролбар ListBox
+	static WSTRINGARRAY *TimeStampList = nullptr;
+	switch (message){
+		case WM_INITDIALOG: {
+			HICON hDialogIcon = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
+			if (hDialogIcon == NULL)MessageError(L"Не удалось загрузить иконку для текущего диалога!", L"Ошибка загрузки иконки!", hDlg);
+			else {
+				SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
+				SendMessageW(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
+			}
+			TimeStampList = (WSTRINGARRAY*)lParam;
+			return (INT_PTR)TRUE;
+		}
+		case WM_COMMAND:
+			switch (HIWORD(wParam)) {
+				case EN_CHANGE:
+					switch (LOWORD(wParam)) {
+						case IDC_EDIT_TIMESTAMP_SERVER: {
+							if (GetWindowTextLengthW((HWND)lParam) / sizeof(WCHAR) > 0) {
+								if (!IsWindowEnabled(hClearInput))EnableWindow(hClearInput, TRUE);
+								if (!IsWindowEnabled(hAddTimeStampServer))EnableWindow(hAddTimeStampServer, TRUE);
+							}
+							else {
+								EnableWindow(hClearInput, FALSE);
+								EnableWindow(hAddTimeStampServer, FALSE);
+							}
+							break;
+						}
+						break;
+					}
+			}
+			switch (LOWORD(wParam)) {
+
+				case IDOK: {
+					LRESULT ItemsCount = SendMessageW(hListTimeStampServers, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
+					for (LRESULT i = 0; i < ItemsCount; i++) {
+						LRESULT TextLen = SendMessageW(hListTimeStampServers, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
+						if (TextLen != LB_ERR) {// если не ошибка
+							WCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
+							ListBoxString.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
+							if (SendMessageW(hListTimeStampServers, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
+								TimeStampList->push_back(ListBoxString.data());
+							}
+							else MessageError(L"Не удалось получить текст невыбранного элемента!", L"Ошибка при получении текста невыбранного элемента!", hDlg);//в случае неудачного получения текста элемента
+						}
+						else MessageError(L"Не удалось узнать длинну текста невыбранного элемента!", L"Ошибка получения длинны невыбранного элемента!", hDlg);//в случае неудачного получения длинны строки
+					}
+				}
+
+				case IDCANCEL:
+					EndDialog(hDlg, LOWORD(wParam));
+					break;
+				case IDC_DELETE_TIMESTAMP_SERVER: {
+					LRESULT ItemsCount = SendMessageW(hListTimeStampServers, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
+					if (ItemsCount != LB_ERR) {//проверка на ошибку
+						MaxStringWhidth = 0;//обнуление длинны прокрутки горизонтального скролбара ListBox
+						for (LRESULT i = 0; i < ItemsCount; i++) {//цикл перебора строк 
+							LRESULT ItemIsSelected = SendMessageW(hListTimeStampServers, LB_GETSEL, (WPARAM)i, NULL);//получение информации о том, выбран ли элемент
+							if (ItemIsSelected > 0) {// если выбран
+								if (SendMessageW(hListTimeStampServers, LB_DELETESTRING, (WPARAM)i, NULL) != LB_ERR) {// и если не ошибка, то удаляем его
+									ItemsCount--; i--;// и уменьшаем итератор и кол-во элементов в списке
+								}
+								else MessageError(L"Не удалось удалить выбранный элемент из списка файлов!", L"Ошибка удаления выбранного элемента!", hDlg);// в случае ошибки
+							}
+							else if (ItemIsSelected == 0) {// если не выбран
+								WCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
+								LRESULT TextLen = SendMessageW(hListTimeStampServers, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
+								if (TextLen != LB_ERR) {// если не ошибка
+									ListBoxString.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
+									if (SendMessageW(hListTimeStampServers, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
+										UINT Temp = CalcBItemWidth(hListTimeStampServers, ListBoxString.data());//пересчитываем длинну прокрутки горизонтального скролбара
+										if (Temp > MaxStringWhidth) MaxStringWhidth = Temp;//если она больше максимальной, то присваиваем её максимальной
+									}
+									else MessageError(L"Не удалось получить текст невыбранного элемента!", L"Ошибка при получении текста невыбранного элемента!", hDlg);//в случае неудачного получения текста элемента
+								}
+								else MessageError(L"Не удалось узнать длинну текста невыбранного элемента!", L"Ошибка получения длинны невыбранного элемента!", hDlg);//в случае неудачного получения длинны строки
+							}
+							else if (ItemIsSelected == LB_ERR)MessageError(L"Не удалось узнать выбран ли элемент", L"Ошибка при распознавании выбранного элемента!", hDlg);//в случае ошибки проверки выбран ли элемент
+						}
+						if (ItemsCount == 0) {// если список стал пустым
+							//отключение всех органов управления, для которых требуется наличие хотя бы одного файла в списке
+							EnableWindow(hDeleteTimeStampServer, FALSE);
+							EnableWindow(hClearTimeStampServers, FALSE);
+						}
+						if (SendMessageW(hListTimeStampServers, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);//реинициализируем горизонтальный скролбар ListBox новым значением длинны прокрутки
+					}
+					else MessageError(L"Не удалось получить количество элементов", L"Ошибка получения количества элементов!", hDlg);//в случае ошибки получения кол-ва элементов
+					break;
+				}
+				case IDC_CLEAR_TIMESTAMP_SERVERS:
+					if (SendMessageW(hListTimeStampServers, LB_RESETCONTENT, NULL, NULL) == LB_ERR)MessageError(L"Не удалось очистить список!", L"Ошибка очистки списка!", hDlg);
+					MaxStringWhidth = 0;//обнуление длинны прокрутки горизонтального скролбара ListBox
+					// "выключение" горизонтального скролбара
+					if (SendMessageW(hListTimeStampServers, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);
+					EnableWindow(hDeleteTimeStampServer, FALSE);
+					EnableWindow(hClearTimeStampServers, FALSE);
+					break;
+				case IDC_ADD_TIMESTAMP_SERVER: {
+					INT AddedTimeStampServerLength = GetWindowTextLengthW(hEditTimeStampServer);
+					if (AddedTimeStampServerLength > 0) {
+						WCHARVECTOR AddedTimeStampServer;
+						AddedTimeStampServer.resize(AddedTimeStampServerLength + 1);
+						if (GetWindowTextW(hEditTimeStampServer, AddedTimeStampServer.data(), AddedTimeStampServerLength + 1)) {
+							if (SendMessageW(hListTimeStampServers, LB_ADDSTRING, NULL, (LPARAM)AddedTimeStampServer.data()) != LB_ERR) {
+								MaxStringWhidth = CalcBItemWidth(hListTimeStampServers, AddedTimeStampServer.data());
+								if (SendMessageW(hListTimeStampServers, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);//реинициализируем горизонтальный скролбар ListBox новым значением длинны прокрутки
+							}
+							else MessageError(L"Не удалось добавить TimeStamp сервер в список!", L"Ошибка добавления элемента в список!", hDlg);
+						}
+					}
+					break;
+				}
+			}
+			break;
 	}
 	return (INT_PTR)FALSE;
 }

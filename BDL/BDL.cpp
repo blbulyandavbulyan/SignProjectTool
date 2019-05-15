@@ -86,8 +86,7 @@ BDLDLL_API INT_PTR CALLBACK BDL::EnterPasswordDlgProcW(HWND hDlg, UINT message, 
 			switch (HIWORD(wParam)) {
 				case EN_CHANGE:
 					switch (LOWORD(wParam)) {
-						case IDC_ENTERPASSWORDDLG_EDIT_PASSWORD:
-						{
+						case IDC_ENTERPASSWORDDLG_EDIT_PASSWORD:{
 							if (GetWindowTextLengthW((HWND)lParam)/sizeof(WCHAR) > 0) {
 								if (ClearButtonDisabled) {
 									EnableWindow(hClear, TRUE);
