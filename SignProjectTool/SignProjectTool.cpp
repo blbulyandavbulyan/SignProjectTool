@@ -99,64 +99,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 			MessageBoxW(NULL, ErrorMessage.c_str(), L"Неверный аргумент командной строки!", MB_ICONERROR | MB_OK);
 			return -1;
 		}
-	}/*
-	WSTRING FileHref = L"C:\\Users\\Давид\\source\\repos\\certs\\Blbulyan Software.pfx", FileForSigning = L"C:\\Users\\Давид\\Desktop\\TestedAplication.exe";
-	HMODULE hMssign32 = LoadLibrary(L"Mssign32.dll"), hBDL = LoadLibrary(L"BDL.dll");
-	if (hBDL != NULL) {
-		if (hMssign32 != NULL) {
-			SignerSignType pfSignerSign = (SignerSignType)GetProcAddress(hMssign32, "SignerSign");
-			if (pfSignerSign) {
-				SIGN_FILE_RESULT::SIGNING_FILE SF;
-				BDL::EnterPasswordDlgInitParamW EPD;
-				LPWSTR Password = nullptr;
-				EPD.Caption = L"Введите пароль от сертификата";
-				EPD.EditPasswordCaption = L"пароль от сертификата";
-				EPD.Password = &Password;
-				EPD.ToolTipCaption[0] = L"Показать пароль от сертификата";
-				EPD.ToolTipCaption[1] = L"Скрыть пароль от сертификата";
-				EPD.HasToolTip = true;
-				EPD.hIconCaption = LoadIcon(PP.hInst, MAKEINTRESOURCE(IDI_SIGNPROJECTTOOL));
-				DialogBoxParamW(hBDL, MAKEINTRESOURCE(IDDBDL_ENTERPASSWORD), NULL, BDL::EnterPasswordDlgProcW, (LPARAM)& EPD);
-				LoadCertificateResult LCR = LoadCertificate(NULL, &FileHref, false, Password);
-				SecureZeroMemory(Password, EPD.PasswordSize);
-				LocalFree(Password);
-				if (LCR.CertificateIsLoaded) {
-					SF.SignCertificate = LCR.pCertContext;
-					SF.SigningFileName = FileForSigning.c_str();
-					SIGN_FILE_RESULT result = SignFile(&SF, pfSignerSign);
-					if (result.InitializationFailed) {
-						MessageBoxW(NULL, L"Ошибка инициализации функции SignFile, дальнейшую подпись файлов продолжить невозможно!", L"Ошибка инициализации функции SignFile", MB_OK | MB_ICONERROR);
-						MessageBoxW(NULL, result.ErrorInfo.ErrorString.c_str(), result.ErrorInfo.ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
-					}
-					if (!result.FileIsSigned) {
-						DWORD CountWriteChars = 0;
-						result.ErrorInfo.ErrorCaption += L"\n";
-						result.ErrorInfo.ErrorString += L"\n";
-						WSTRING OutputString = result.ErrorInfo.ErrorCaption + result.ErrorInfo.ErrorString;
-						OutputDebugStringW(OutputString.c_str());
-					}
-					else {
-						DWORD CountWriteChars = 0;
-						WSTRING OutputSigningFileInfo = L"Файл \"";
-						OutputSigningFileInfo += FileForSigning.c_str();
-						OutputSigningFileInfo += L"\" был успешно подписа\n";
-						OutputDebugStringW(OutputSigningFileInfo.c_str());
-					}
-					CertFreeCertificateContext(LCR.pCertContext);
-					CertCloseStore(LCR.hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
-				}
-
-			}
-			else MessageError(L"Не удалось получить адрес функции SignerSign из Mssign32.dll, дальнейшее подписание файлов не возможно!", L"Ошибка получения адресса функции!", NULL);
-			FreeLibrary(hMssign32);
-		}
-		else MessageError(L"не удалось загрузить библиотеку Mssign32.dll", L"Ошибка загрузки библиотеки!", NULL);
-		FreeLibrary(hBDL);
 	}
-	else {
-		MessageError(L"не удалось загрузить библиотеку BDL.dll!", L"Ошибка загрузки библиотеки!", NULL);
-		return FALSE;
-	}*/
 	HACCEL hAccel = LoadAcceleratorsW(PP.hInst, MAKEINTRESOURCEW(IDC_SIGNPROJECTTOOL));
 	MSG msg = { 0 };
 	if (hAccel) {
@@ -500,7 +443,7 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 							L"*.exe, *.dll, *.lib, *.cab файлы",
 							L"*.exe;*.dll;*.lib;*.cab"
 						}
-					};
+					};//
 					WSTRINGARRAY OpenningFiles = OpenFiles(hDlg, cmf, sizeof(cmf)/sizeof(cmf[0]), L"Выберете файлы для цифровой подписи", L"Добавить...", true);
 					size_t OpenningFilesSize = OpenningFiles.size();
 					if (OpenningFilesSize > 0) {
