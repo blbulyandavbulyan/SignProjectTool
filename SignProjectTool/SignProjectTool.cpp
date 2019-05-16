@@ -45,12 +45,13 @@ typedef HLOCAL(*PFreeAlocatedBuffer)(HLOCAL Buffer);
 INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);// процедура обработки сообщений диалога IDD_START_CONFIGURATION
 INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);// процедура обработки сообщений диалога IDD_ADD_FILES_FOR_CERTIFICATION
-INT_PTR CALLBACK SettingsTimeStampsServers(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);//процедура обработки сообщений диалога IDD_SETTINGS_TIMESTAMP_SERVERS
+INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);//процедура обработки сообщений диалога IDD_SETTINGS_TIMESTAMP_SERVERS
 UINT CalcBItemWidth(HWND hLB, LPCTSTR Text);
 WSTRINGARRAY OpenFiles(HWND hWnd, COMDLG_FILTERSPEC *cmf, UINT cmfSize, LPCWSTR TitleFileDialog, LPCWSTR OKButtonTitle, bool Multiselect);
 SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SignerSignType pfSignerSign);
 LoadCertificateResult LoadCertificate(HWND hWnd, const WSTRING *CertificateHref, bool LoadCertificateFromCertStore, LPCWSTR password);
 bool ThisStringIsProgrammArgument(WSTRING arg);
+INT StringExistInListBox(HWND hListBox, WSTRING str);
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
                      _In_ LPWSTR    lpCmdLine,
@@ -210,7 +211,7 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     return (INT_PTR)FALSE;
 }
 INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
-	HWND hCertStoreName = GetDlgItem(hDlg, IDC_CERT_STORE_NAME), hOpenFile = GetDlgItem(hDlg, IDC_OPEN_FILE), hCertFile = GetDlgItem(hDlg, IDC_CERT_FILE), hCertStore = GetDlgItem(hDlg, IDC_CERT_STORE), hEditTimeStamp = GetDlgItem(hDlg, IDC_EDIT_TIMESTAMP);
+	HWND hCertStoreName = GetDlgItem(hDlg, IDC_CERT_STORE_NAME), hOpenFile = GetDlgItem(hDlg, IDC_OPEN_FILE), hCertFile = GetDlgItem(hDlg, IDC_CERT_FILE), hCertStore = GetDlgItem(hDlg, IDC_CERT_STORE);
 	static WSTRING CertificateFileName;
 	switch(message){
 		case WM_INITDIALOG:{
@@ -249,17 +250,7 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 					EndDialog(hDlg, IDM_EXIT);
 					break;
 				case IDOK: {
-					LRESULT HttpTimeStampLength = GetWindowTextLengthW(hEditTimeStamp) + 1;
-					if (HttpTimeStampLength > 0) {
-						WCHARVECTOR HttpTimeStamp;
-						HttpTimeStamp.resize(HttpTimeStampLength);
-						if (GetWindowTextW(hEditTimeStamp, HttpTimeStamp.data(), HttpTimeStampLength)) {
-
-						}
-					}
-					else {
-						PP.HttpTimeStampServer = L"";
-					}
+					
 					PP.CertificateFile = CertificateFileName;
 					EndDialog(hDlg, IDOK);
 					return (INT_PTR)TRUE; 
@@ -293,6 +284,11 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 					}
 					break;
 				}
+				case IDC_BUTTON_SETTINGSTIMESTAMP: {
+					WSTRINGARRAY TimeStampServers;
+					DialogBoxParamW(PP.hInst, MAKEINTRESOURCEW(IDD_SETTINGS_TIMESTAMP_SERVERS), hDlg, SettingsTimeStampsServersDlgProc, (LPARAM)& TimeStampServers);
+					break;
+				}
 				
 			}
 			break;
@@ -315,13 +311,34 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 			return (INT_PTR)TRUE;
 		}
 		case WM_COMMAND:
+			switch (HIWORD(wParam)) {
+				case LBN_SELCHANGE: {
+					switch (LOWORD(wParam)) {
+						case IDC_LIST_SELECTED_FILES_FOR_CERTIFICTION: {
+							LRESULT ItemsCountSelected = SendMessageW(hListSelectedFilesForCertification, LB_GETSELCOUNT, NULL, NULL);// получение кол-ва выбранных элементов(файлов) в списке
+							if (ItemsCountSelected != LB_ERR) {
+								if (ItemsCountSelected > 0) {
+									EnableWindow(hDeleteFile, TRUE);
+								}
+								else {
+									EnableWindow(hDeleteFile, FALSE);
+								}
+							}
+							else MessageError(L"Не удалось получить количество выбранных элементов", L"Ошибка получения количества элементов!", hDlg);//в случае ошибки получения кол-ва элементов
+							break;
+						}
+					}
+					break;
+				}
+				break;
+			}
 			switch (LOWORD(wParam)) {
 				case IDM_STARTUPCONFIG: {
 					if (DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc) == IDOK) {
 						LRESULT ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
 						if (ItemsCount > 0 && PP.CertificateFile != L"")EnableWindow(hSign, TRUE);
-						break;
 					}
+					break;
 				}
 				case IDM_ABOUT: //обработка пункта меню "О программе"
 					DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_ABOUTBOX), hDlg, About);
@@ -488,16 +505,17 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 					size_t OpenningFilesSize = OpenningFiles.size();
 					if (OpenningFilesSize > 0) {
 						for (size_t i = 0; i < OpenningFilesSize; i++) {
-							if (SendMessageW(hListSelectedFilesForCertification, LB_ADDSTRING, NULL, (LPARAM)OpenningFiles[i].c_str()) != LB_ERR) {
-								UINT Temp = CalcBItemWidth(hListSelectedFilesForCertification, OpenningFiles[i].c_str());
-								if (Temp > MaxStringWhidth)MaxStringWhidth = Temp;
+							if (!StringExistInListBox(hListSelectedFilesForCertification, OpenningFiles[i])) {
+								if (SendMessageW(hListSelectedFilesForCertification, LB_ADDSTRING, NULL, (LPARAM)OpenningFiles[i].c_str()) != LB_ERR) {
+									UINT Temp = CalcBItemWidth(hListSelectedFilesForCertification, OpenningFiles[i].c_str());
+									if (Temp > MaxStringWhidth)MaxStringWhidth = Temp;
+								}
+								else MessageError(L"Не удалось добавить файл!", L"Ошибка добавления файла!", hDlg);
 							}
-							else MessageError(L"Не удалось добавить файл!", L"Ошибка добавления файла!", hDlg);
 						}
 						SendMessageW(hListSelectedFilesForCertification, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0);
-						EnableWindow(hDeleteFile, TRUE);
-						EnableWindow(hModifyFile, TRUE);
 						if (PP.CertificateFile != L"")EnableWindow(hSign, TRUE);
+						EnableWindow(hModifyFile, TRUE);
 						EnableWindow(hClear, TRUE);
 					}
 					break;
@@ -531,12 +549,12 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 						}
 						if (ItemsCount == 0) {// если список стал пустым
 							//отключение всех органов управления, для которых требуется наличие хотя бы одного файла в списке
-							EnableWindow(hDeleteFile, FALSE);
 							EnableWindow(hModifyFile, FALSE);
 							EnableWindow(hSign, FALSE);
 							EnableWindow(hClear, FALSE);
 						}
 						if (SendMessageW(hListSelectedFilesForCertification, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);//реинициализируем горизонтальный скролбар ListBox новым значением длинны прокрутки
+						EnableWindow(hDeleteFile, FALSE);
 					}
 					else MessageError(L"Не удалось получить количество элементов", L"Ошибка получения количества элементов!", hDlg);//в случае ошибки получения кол-ва элементов
 					break;
@@ -560,8 +578,8 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 	}
 	return (INT_PTR)FALSE;
 }
-
-INT_PTR CALLBACK SettingsTimeStampsServers(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam){
+//процедура обработки сообщений 
+INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam){
 	HWND hClearInput = GetDlgItem(hDlg, IDC_CLEAR_INPUT), hAddTimeStampServer = GetDlgItem(hDlg, IDC_ADD_TIMESTAMP_SERVER), hDeleteTimeStampServer = GetDlgItem(hDlg, IDC_DELETE_TIMESTAMP_SERVER), hClearTimeStampServers = GetDlgItem(hDlg, IDC_CLEAR_TIMESTAMP_SERVERS), hListTimeStampServers = GetDlgItem(hDlg, IDC_LIST_TIMESTAMP_SERVERS), hEditTimeStampServer = GetDlgItem(hDlg, IDC_EDIT_TIMESTAMP_SERVER);
 	static UINT MaxStringWhidth = 0;//переменная характеризует максимально возможное значение, на которое можно прокрутить горизонтальный скролбар ListBox
 	static WSTRINGARRAY *TimeStampList = nullptr;
@@ -593,23 +611,39 @@ INT_PTR CALLBACK SettingsTimeStampsServers(HWND hDlg, UINT message, WPARAM wPara
 						}
 						break;
 					}
+				case LBN_SELCHANGE: {
+					LRESULT ItemsCountSelected = SendMessageW(hListTimeStampServers, LB_GETSELCOUNT, NULL, NULL);// получение кол-ва выбранных элементов(файлов) в списке
+					if (ItemsCountSelected != LB_ERR) {
+						if (ItemsCountSelected > 0) {
+							EnableWindow(hDeleteTimeStampServer, TRUE);
+						}
+						else {
+							EnableWindow(hDeleteTimeStampServer, FALSE);
+						}
+					}
+					else MessageError(L"Не удалось получить количество выбранных элементов", L"Ошибка получения количества элементов!", hDlg);//в случае ошибки получения кол-ва элементов
+					break; 
+				}
 			}
 			switch (LOWORD(wParam)) {
 
 				case IDOK: {
 					LRESULT ItemsCount = SendMessageW(hListTimeStampServers, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
-					for (LRESULT i = 0; i < ItemsCount; i++) {
-						LRESULT TextLen = SendMessageW(hListTimeStampServers, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
-						if (TextLen != LB_ERR) {// если не ошибка
-							WCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
-							ListBoxString.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
-							if (SendMessageW(hListTimeStampServers, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
-								TimeStampList->push_back(ListBoxString.data());
+					if (ItemsCount != LB_ERR) {
+						for (LRESULT i = 0; i < ItemsCount; i++) {
+							LRESULT TextLen = SendMessageW(hListTimeStampServers, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
+							if (TextLen != LB_ERR) {// если не ошибка
+								WCHARVECTOR ListBoxString;// здесь будет хранится полученная строка из ListBox
+								ListBoxString.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
+								if (SendMessageW(hListTimeStampServers, LB_GETTEXT, (WPARAM)i, (LPARAM)ListBoxString.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
+									TimeStampList->push_back(ListBoxString.data());
+								}
+								else MessageError(L"Не удалось получить текст невыбранного элемента!", L"Ошибка при получении текста невыбранного элемента!", hDlg);//в случае неудачного получения текста элемента
 							}
-							else MessageError(L"Не удалось получить текст невыбранного элемента!", L"Ошибка при получении текста невыбранного элемента!", hDlg);//в случае неудачного получения текста элемента
+							else MessageError(L"Не удалось узнать длинну текста невыбранного элемента!", L"Ошибка получения длинны невыбранного элемента!", hDlg);//в случае неудачного получения длинны строки
 						}
-						else MessageError(L"Не удалось узнать длинну текста невыбранного элемента!", L"Ошибка получения длинны невыбранного элемента!", hDlg);//в случае неудачного получения длинны строки
 					}
+					else MessageError(L"Не удалось получить количество элементов", L"Ошибка получения количества элементов!", hDlg);//в случае ошибки получения кол-ва элементов
 				}
 
 				case IDCANCEL:
@@ -652,6 +686,9 @@ INT_PTR CALLBACK SettingsTimeStampsServers(HWND hDlg, UINT message, WPARAM wPara
 					else MessageError(L"Не удалось получить количество элементов", L"Ошибка получения количества элементов!", hDlg);//в случае ошибки получения кол-ва элементов
 					break;
 				}
+				case IDC_CLEAR_INPUT:
+					SetWindowTextW(hEditTimeStampServer, L"");
+					break;
 				case IDC_CLEAR_TIMESTAMP_SERVERS:
 					if (SendMessageW(hListTimeStampServers, LB_RESETCONTENT, NULL, NULL) == LB_ERR)MessageError(L"Не удалось очистить список!", L"Ошибка очистки списка!", hDlg);
 					MaxStringWhidth = 0;//обнуление длинны прокрутки горизонтального скролбара ListBox
@@ -666,11 +703,15 @@ INT_PTR CALLBACK SettingsTimeStampsServers(HWND hDlg, UINT message, WPARAM wPara
 						WCHARVECTOR AddedTimeStampServer;
 						AddedTimeStampServer.resize(AddedTimeStampServerLength + 1);
 						if (GetWindowTextW(hEditTimeStampServer, AddedTimeStampServer.data(), AddedTimeStampServerLength + 1)) {
-							if (SendMessageW(hListTimeStampServers, LB_ADDSTRING, NULL, (LPARAM)AddedTimeStampServer.data()) != LB_ERR) {
-								MaxStringWhidth = CalcBItemWidth(hListTimeStampServers, AddedTimeStampServer.data());
-								if (SendMessageW(hListTimeStampServers, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);//реинициализируем горизонтальный скролбар ListBox новым значением длинны прокрутки
+							if (StringExistInListBox(hListTimeStampServers, AddedTimeStampServer.data())) {
+								if (SendMessageW(hListTimeStampServers, LB_ADDSTRING, NULL, (LPARAM)AddedTimeStampServer.data()) != LB_ERR) {
+									MaxStringWhidth = CalcBItemWidth(hListTimeStampServers, AddedTimeStampServer.data());
+										if (SendMessageW(hListTimeStampServers, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);//реинициализируем горизонтальный скролбар ListBox новым значением длинны прокрутки
+										EnableWindow(hClearTimeStampServers, TRUE);
+										SetWindowTextW(hEditTimeStampServer, L"");
+								}
+								else MessageError(L"Не удалось добавить TimeStamp сервер в список!", L"Ошибка добавления элемента в список!", hDlg);
 							}
-							else MessageError(L"Не удалось добавить TimeStamp сервер в список!", L"Ошибка добавления элемента в список!", hDlg);
 						}
 					}
 					break;
@@ -884,4 +925,13 @@ SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SignerSignType pf
 bool ThisStringIsProgrammArgument(WSTRING arg) {
 	for (size_t i = 0; i < ProgrammSettings::CommandLineValidArguments.size(); i++)if (arg == ProgrammSettings::CommandLineValidArguments[i])return true;
 	return false;
+}
+
+INT StringExistInListBox(HWND hListBox, WSTRING str)
+{
+	if (hListBox != NULL) {
+		if (SendMessageW(hListBox, LB_FINDSTRING, -1, (LPARAM)str.c_str()) == LB_ERR)return FALSE;
+		else return TRUE;
+	}
+	return -1;
 }
