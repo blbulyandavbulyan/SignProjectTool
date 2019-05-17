@@ -37,8 +37,10 @@
 #define IDC_ADD_TIMESTAMP_SERVER        1018
 #define IDC_DELETE_TIMESTAMP_SERVER     1019
 #define IDC_CLEAR_INPUT                 1021
-#define IDC_BUTTON4                     1022
 #define IDC_CLEAR_TIMESTAMP_SERVERS     1023
+#define IDC_BUTTON_SELECT_CERTIFICATE_FROM_STORE 1024
+#define IDC_COMBO2                      1025
+#define IDC_COMBOX_LISTCERT_FILES       1026
 #define ID_32771                        32771
 #define IDM_STARTUPCONFIG               32772
 #define IDC_STATIC                      -1
@@ -50,7 +52,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        132
 #define _APS_NEXT_COMMAND_VALUE         32773
-#define _APS_NEXT_CONTROL_VALUE         1024
+#define _APS_NEXT_CONTROL_VALUE         1027
 #define _APS_NEXT_SYMED_VALUE           111
 #endif
 #endif

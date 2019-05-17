@@ -10,10 +10,10 @@ struct ProgrammSettings {
 	HINSTANCE hInst;//экземпляр приложения
 	WSTRINGARRAY FilesForCertification;//список файлов для подписи
 	WSTRING CertificateFile;// имя файла сертификата для подписи им
-	WSTRING HttpTimeStampServer;
+	WSTRINGARRAY HttpTimeStampServers;
 	static const WSTRINGARRAY CommandLineValidArguments;//массив с допустимыми аргументами командной строки
 	bool CertificateInCertStore = false;//хранится ли сертификат, которым будут подписываться файлы в хранилище сертификатов (задаётся при начальной настройке программы
-	ALG_ID HashAlgorithmId = CALG_SHA_512;//алгоритм хеширования при подписи поумолчанию
+	ALG_ID HashAlgorithmId = CALG_SHA1;//алгоритм хеширования при подписи поумолчанию
 } PP;
 const WSTRINGARRAY ProgrammSettings::CommandLineValidArguments = {
 		L"--about",
@@ -154,7 +154,7 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     return (INT_PTR)FALSE;
 }
 INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
-	HWND hCertStoreName = GetDlgItem(hDlg, IDC_CERT_STORE_NAME), hOpenFile = GetDlgItem(hDlg, IDC_OPEN_FILE), hCertFile = GetDlgItem(hDlg, IDC_CERT_FILE), hCertStore = GetDlgItem(hDlg, IDC_CERT_STORE);
+	HWND hOpenFromCertStore = GetDlgItem(hDlg, IDC_BUTTON_SELECT_CERTIFICATE_FROM_STORE), hOpenFile = GetDlgItem(hDlg, IDC_OPEN_FILE), hCertFile = GetDlgItem(hDlg, IDC_CERT_FILE), hCertStore = GetDlgItem(hDlg, IDC_CERT_STORE), hCertList = GetDlgItem(hDlg, IDC_COMBOX_LISTCERT_FILES);
 	static WSTRING CertificateFileName;
 	switch(message){
 		case WM_INITDIALOG:{
@@ -204,15 +204,28 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 				case IDC_CERT_STORE:
 					if (IsDlgButtonChecked(hDlg, IDC_CERT_STORE) == BST_CHECKED) {
 						EnableWindow(hOpenFile, FALSE);
-						EnableWindow(hCertStoreName, TRUE);
+						EnableWindow(hCertList, FALSE);
+						EnableWindow(hOpenFromCertStore, TRUE);
 					}
 					break;
 				case IDC_CERT_FILE:
 					if (IsDlgButtonChecked(hDlg, IDC_CERT_FILE) == BST_CHECKED) {
 						EnableWindow(hOpenFile, TRUE);
-						EnableWindow(hCertStoreName, FALSE);
+						EnableWindow(hCertList, TRUE);
+						EnableWindow(hOpenFromCertStore, FALSE);
 					}
 					break;
+				case IDC_BUTTON_SELECT_CERTIFICATE_FROM_STORE: {
+					HCERTSTORE hSysStore = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, X509_ASN_ENCODING, NULL, CERT_SYSTEM_STORE_CURRENT_USER, L"My");
+					if (hSysStore != NULL) {
+						PCCERT_CONTEXT CertificateForSigning = CryptUIDlgSelectCertificateFromStore(hSysStore, hDlg, L"Выберите сертификат для подписи:", NULL, NULL, NULL, NULL);
+						if (CertificateForSigning != NULL) {
+							CertFreeCertificateContext(CertificateForSigning);
+						}
+						CertCloseStore(hSysStore, CERT_CLOSE_STORE_FORCE_FLAG);
+					}
+					break; 
+				}
 				case IDC_OPEN_FILE:{
 					COMDLG_FILTERSPEC cmf[1] = {//массив с фильтрами
 						//фильтр для *.exe файлов
@@ -223,6 +236,11 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 					};
 					WSTRINGARRAY CertificateFile = OpenFiles(hDlg, cmf, sizeof(cmf) / sizeof(COMDLG_FILTERSPEC), L"Загрузите сертификат для подписи", L"Загрузить", false);
 					if (CertificateFile.size() > 0) {
+						if (SendMessage(hCertList, CB_SELECTSTRING, -1, (LPARAM)CertificateFile[0].c_str()) == CB_ERR) {
+							 LRESULT AddStringResult = SendMessage(hCertList, CB_ADDSTRING, 0, (LPARAM)CertificateFile[0].c_str());
+							 if (AddStringResult == CB_ERR || AddStringResult == CB_ERRSPACE)MessageError(L"Ошибка добавления строки с именем файла сертификат с соответсвующий список!", L"Ошибка при добавлении стрроки в combobox", hDlg);
+							 else SendMessage(hCertList, CB_SELECTSTRING, -1, (LPARAM)CertificateFile[0].c_str());
+						}
 						CertificateFileName = CertificateFile[0];
 					}
 					break;
@@ -240,7 +258,8 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 }
 // Функция обработки сообщений диалога IDD_ADD_FILES_FOR_CERTIFICATION
 INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
-	HWND hListSelectedFilesForCertification = GetDlgItem(hDlg, IDC_LIST_SELECTED_FILES_FOR_CERTIFICTION), hDeleteFile = GetDlgItem(hDlg, IDC_DELETE_FILE), hModifyFile = GetDlgItem(hDlg, IDC_MODIFY_FILE), hSign = GetDlgItem(hDlg, IDC_SIGN), hClear = GetDlgItem(hDlg, IDC_CLEAR);
+	HWND hListSelectedFilesForCertification = GetDlgItem(hDlg, IDC_LIST_SELECTED_FILES_FOR_CERTIFICTION), hDeleteFile = GetDlgItem(hDlg, IDC_DELETE_FILE), hModifyFile = GetDlgItem(hDlg, IDC_MODIFY_FILE), hSign = GetDlgItem(hDlg, IDC_SIGN), hClear = GetDlgItem(hDlg, IDC_CLEAR); 
+	static HWND hStatusBar = NULL;
 	static UINT MaxStringWhidth = 0;//переменная характеризует максимально возможное значение, на которое можно прокрутить горизонтальный скролбар ListBox
 	switch (message) {
 		case WM_INITDIALOG:{
@@ -251,6 +270,15 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 				SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
 				SendMessageW(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
 			}
+			hStatusBar = CreateStatusWindowW(WS_VISIBLE | WS_CHILD, L"Ничего не запланировано", hDlg, 1);
+			RECT DialogRect = {0};
+			GetWindowRect(hDlg, &DialogRect);
+			
+			int StatusBarBordersArray[2];
+			StatusBarBordersArray[0] = abs(DialogRect.left - DialogRect.right)/2;
+			StatusBarBordersArray[1] = abs(DialogRect.left - DialogRect.right);
+			SendMessage(hStatusBar, SB_SETPARTS, 2, (LPARAM)StatusBarBordersArray);
+			SendMessage(hStatusBar, SB_SETTEXTW, MAKEWORD(1, SBT_POPOUT), (LPARAM)L"Сертификат не загружен");
 			return (INT_PTR)TRUE;
 		}
 		case WM_COMMAND:
@@ -279,6 +307,7 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 				case IDM_STARTUPCONFIG: {
 					if (DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc) == IDOK) {
 						LRESULT ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
+						if(PP.CertificateFile != L"")SendMessage(hStatusBar, SB_SETTEXTW, MAKEWORD(1, SBT_POPOUT), (LPARAM)L"Сертификат загружен");
 						if (ItemsCount > 0 && PP.CertificateFile != L"")EnableWindow(hSign, TRUE);
 					}
 					break;
@@ -289,17 +318,6 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 				case IDC_SIGN:{//обработка кнопки "Подписать"
 					LRESULT ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
 					if (ItemsCount != LB_ERR) {
-						BOOL ConsoleIsAlloced = AllocConsole();
-						HANDLE hOutputConsole = nullptr, hInputConsole = nullptr, hErrorConsole = nullptr;
-						if (ConsoleIsAlloced == NULL)MessageError(L"Не удалось выделить консоль, отчёты о подписанных и неподписанных файлах отображаться не будут!", L"Ошибка выделения консоли!", hDlg);
-						else {
-							hOutputConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-							hInputConsole = GetStdHandle(STD_INPUT_HANDLE);
-							hErrorConsole = GetStdHandle(STD_ERROR_HANDLE);
-							if ((hOutputConsole == NULL) || (hOutputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода информации о подписанных файлах!", L"Ошибка получения дескриптора консоли!", hDlg);
-							if ((hInputConsole == NULL) || (hInputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для ввода!", L"Ошибка получения дескриптора консоли!", hDlg);
-							if ((hErrorConsole == NULL) || (hErrorConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода ошибок о неподписанных файлов!", L"Ошибка получения дескриптора консоли!", hDlg);
-						}
 						HMODULE hBDL = LoadLibraryW(L"BDL.dll"), hMssign32 = LoadLibrary(L"Mssign32.dll");
 						if (hBDL) {
 							if (hMssign32 != NULL) {
@@ -322,9 +340,23 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 										SecureZeroMemory(Password, EPD.PasswordSize);
 										LocalFree(Password);
 										if (LCR.CertificateIsLoaded) {
+											BOOL ConsoleIsAlloced = AllocConsole();
+											HANDLE hOutputConsole = nullptr, hInputConsole = nullptr, hErrorConsole = nullptr;
+											if (ConsoleIsAlloced == NULL)MessageError(L"Не удалось выделить консоль, отчёты о подписанных и неподписанных файлах отображаться не будут!", L"Ошибка выделения консоли!", hDlg);
+											else {
+												hOutputConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+												hInputConsole = GetStdHandle(STD_INPUT_HANDLE);
+												hErrorConsole = GetStdHandle(STD_ERROR_HANDLE);
+												SetConsoleTitleW(L"Диагностическая информация о подписи файлов:");
+												if ((hOutputConsole == NULL) || (hOutputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода информации о подписанных файлах!", L"Ошибка получения дескриптора консоли!", hDlg);
+												if ((hInputConsole == NULL) || (hInputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для ввода!", L"Ошибка получения дескриптора консоли!", hDlg);
+												if ((hErrorConsole == NULL) || (hErrorConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода ошибок о неподписанных файлов!", L"Ошибка получения дескриптора консоли!", hDlg);
+											}
 											SF.SignCertificate = LCR.pCertContext;
 											SendMessageW(hProgressForSigningFiles, PBM_SETRANGE32, 0, ItemsCount);
 											SendMessageW(hProgressForSigningFiles, PBM_SETSTEP, (WPARAM)1, NULL);
+											SendMessageW(hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Идёт подпись файлов");
+											bool AnErrorHasOccurred = false;
 											for (LRESULT i = 0; i < ItemsCount; i++) {//цикл перебора строк 
 												WCHARVECTOR FileForSigning;// здесь будет хранится полученная строка из ListBox
 												LRESULT TextLen = SendMessageW(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
@@ -341,9 +373,10 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 														}
 														if (!result.FileIsSigned) {
 															DWORD CountWriteChars = 0;
-															result.ErrorInfo.ErrorCaption += L"\n";
+															result.ErrorInfo.ErrorCaption = + L"[" + std::to_wstring(i+1) + L"]" + result.ErrorInfo.ErrorCaption + L"\n";
 															result.ErrorInfo.ErrorString += L"\n";
 															if ((hErrorConsole != NULL) && (hErrorConsole != INVALID_HANDLE_VALUE)) {
+																SetConsoleTextAttribute(hErrorConsole, FOREGROUND_RED);
 																WriteConsoleW(hErrorConsole, result.ErrorInfo.ErrorCaption.c_str(), result.ErrorInfo.ErrorCaption.size(), &CountWriteChars, NULL);
 																WriteConsoleW(hErrorConsole, result.ErrorInfo.ErrorString.c_str(), result.ErrorInfo.ErrorString.size(), &CountWriteChars, NULL);
 															}
@@ -353,13 +386,21 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 																OutputDebugStringW(OutputString.c_str());
 															}
 															#endif
+															if (!AnErrorHasOccurred) {
+																AnErrorHasOccurred = true;
+																SendMessageW(hProgressForSigningFiles, PBM_SETBARCOLOR, 0, RGB(255, 0, 0));
+															}
 														}
 														else {
 															DWORD CountWriteChars = 0;
-															WSTRING OutputSigningFileInfo = L"Файл \"";
+															WSTRING OutputSigningFileInfo = L"[" + std::to_wstring(i+1) + L"]";
+															OutputSigningFileInfo += L"Файл \"";
 															OutputSigningFileInfo += FileForSigning.data();
-															OutputSigningFileInfo += L"\" был успешно подписа\n";
-															if ((hOutputConsole != NULL) && (hOutputConsole != INVALID_HANDLE_VALUE))WriteConsoleW(hOutputConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL);
+															OutputSigningFileInfo += L"\" был успешно подписан\n";
+															if ((hOutputConsole != NULL) && (hOutputConsole != INVALID_HANDLE_VALUE)) {
+																SetConsoleTextAttribute(hOutputConsole, FOREGROUND_GREEN);
+																WriteConsoleW(hOutputConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL);
+															}
 															#ifdef _DEBUG
 															else OutputDebugStringW(OutputSigningFileInfo.c_str());
 															#endif
@@ -369,32 +410,51 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 													else {
 														//В случае ошибки получения имени файла
 														DWORD CountWriteChars = 0;
-														WSTRING OutputSigningFileInfo = L"Не получить имя файла под индексом ";
+														WSTRING OutputSigningFileInfo = L"[" + std::to_wstring(i+1) + L"]";
+														OutputSigningFileInfo = L"Не удалось получить имя файла под индексом ";
 														OutputSigningFileInfo += std::to_wstring(i);
 														OutputSigningFileInfo += L" в списке, файл не был подписан\n";
-														if ((hErrorConsole != NULL) && (hErrorConsole != INVALID_HANDLE_VALUE))WriteConsoleW(hErrorConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL);
+														if ((hErrorConsole != NULL) && (hErrorConsole != INVALID_HANDLE_VALUE)) {
+															SetConsoleTextAttribute(hErrorConsole, FOREGROUND_RED);
+															WriteConsoleW(hErrorConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL);
+														}
 														#ifdef _DEBUG
 														else OutputDebugStringW(OutputSigningFileInfo.c_str());
 														#endif
+														if (!AnErrorHasOccurred) {
+															AnErrorHasOccurred = true;
+															SendMessageW(hProgressForSigningFiles, PBM_SETBARCOLOR, 0, RGB(255, 0, 0));
+														}
 													}
 												}
 												else {
 													//В случае ошибки получения длинны
 													DWORD CountWriteChars = 0;
-													WSTRING OutputSigningFileInfo = L"Не получить длинну имени файла под индексом ";
+													WSTRING OutputSigningFileInfo = L"[" + std::to_wstring(i+1) + L"]";
+													OutputSigningFileInfo = L"Не получить длинну имени файла под индексом ";
 													OutputSigningFileInfo += std::to_wstring(i);
 													OutputSigningFileInfo += L" в списке, файл не был подписан\n";
-													if ((hErrorConsole != NULL) && (hErrorConsole != INVALID_HANDLE_VALUE))WriteConsoleW(hErrorConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL);
+													if ((hErrorConsole != NULL) && (hErrorConsole != INVALID_HANDLE_VALUE)) {
+														SetConsoleTextAttribute(hErrorConsole, FOREGROUND_RED);
+														WriteConsoleW(hErrorConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL); 
+													}
 													#ifdef _DEBUG
 													else OutputDebugStringW(OutputSigningFileInfo.c_str());
 													#endif
+													if (!AnErrorHasOccurred) {
+														AnErrorHasOccurred = true;
+														SendMessageW(hProgressForSigningFiles, PBM_SETBARCOLOR, 0, RGB(255, 0, 0));
+													}
 												}
 											}
 											EnableWindow(hProgressForSigningFiles, FALSE);
 											if (ConsoleIsAlloced)FreeConsole();
 											CertFreeCertificateContext(LCR.pCertContext);
 											CertCloseStore(LCR.hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
+											if(AnErrorHasOccurred)SendMessageW(hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Подпись завершена с ошибками");
+											
 										}
+										else MessageBox(hDlg, LCR.ErrorInfo.ErrorString.c_str(), LCR.ErrorInfo.ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
 									}
 
 									
@@ -762,11 +822,16 @@ LoadCertificateResult LoadCertificate(HWND hWnd, const WSTRING *CertificateHref,
 							LCR.pCertContext = CertFindCertificateInStore(LCR.hCertStore, X509_ASN_ENCODING | PKCS_7_ASN_ENCODING, 0, CERT_FIND_ANY, NULL, NULL);
 							if (LCR.pCertContext != nullptr)LCR.CertificateIsLoaded = true;
 							else {
-								WSTRING ErrorText = L"Не удалось получить загрузить сертификат \"" + (*CertificateHref) + L"\"!";
+								WSTRING ErrorText = L"Не удалось загрузить сертификат \"" + (*CertificateHref) + L"\"!";
 								LCR.ErrorInfo = ErrorString(ErrorText.c_str());
 								LCR.ErrorInfo.ErrorCaption = L"Ошибка загрузки сертификата!";
 							}
 							//CertCloseStore(hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
+						}
+						else {
+							WSTRING ErrorText = L"Не удалось загрузить сертификат \"" + (*CertificateHref) + L"\"!";
+							LCR.ErrorInfo = ErrorString(ErrorText.c_str());
+							LCR.ErrorInfo.ErrorCaption = L"Ошибка загрузки сертификата!";
 						}
 						UnmapViewOfFile(CertificateBlob.pbData);
 					}
@@ -838,7 +903,7 @@ SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SignerSignType pf
 		signerCert.hwnd = NULL;
 		// Prepare SIGNER_SIGNATURE_INFO struct
 		signerSignatureInfo.cbSize = sizeof(SIGNER_SIGNATURE_INFO);
-		signerSignatureInfo.algidHash = CALG_SHA1;
+		signerSignatureInfo.algidHash = SF->HashAlgorithmId;
 		signerSignatureInfo.psAuthenticated = NULL;
 		signerSignatureInfo.psUnauthenticated = NULL;
 		signerSignatureInfo.dwAttrChoice = NULL; // SIGNER_NO_ATTR

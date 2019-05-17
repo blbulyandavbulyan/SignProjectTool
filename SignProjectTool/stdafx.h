@@ -13,6 +13,7 @@
 #include <ShObjIdl.h>
 #include <wincrypt.h>
 #include <cryptuiapi.h>
+#include <iostream>
 // Файлы заголовков среды выполнения C
 #include <stdlib.h>
 #include <malloc.h>
