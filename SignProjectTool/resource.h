@@ -23,7 +23,7 @@
 #define IDC_ADD_FILE                    1006
 #define IDC_DELETE_FILE                 1007
 #define IDC_PROGRESS1                   1008
-#define IDC_PORGRESS_SIGNING_FILES      1008
+#define IDC_PROGRESS_SIGNING_FILES      1008
 #define IDC_MODIFY_FILE                 1009
 #define IDC_SIGN                        1010
 #define IDC_BUTTON2                     1012
@@ -41,6 +41,9 @@
 #define IDC_BUTTON_SELECT_CERTIFICATE_FROM_STORE 1024
 #define IDC_COMBO2                      1025
 #define IDC_COMBOX_LISTCERT_FILES       1026
+#define IDC_BUTTON1                     1027
+#define IDC_PAUSE_SIGNING               1027
+#define IDC_ITEMS_COUNT                 1028
 #define ID_32771                        32771
 #define IDM_STARTUPCONFIG               32772
 #define IDC_STATIC                      -1
@@ -52,7 +55,7 @@
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        132
 #define _APS_NEXT_COMMAND_VALUE         32773
-#define _APS_NEXT_CONTROL_VALUE         1027
+#define _APS_NEXT_CONTROL_VALUE         1029
 #define _APS_NEXT_SYMED_VALUE           111
 #endif
 #endif

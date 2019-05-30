@@ -13,11 +13,12 @@
 #include <ShObjIdl.h>
 #include <wincrypt.h>
 #include <cryptuiapi.h>
-#include <iostream>
+#include <Uxtheme.h>
 // Файлы заголовков среды выполнения C
 #include <stdlib.h>
 #include <malloc.h>
 #include <memory.h>
+#include <iostream>
 //Файлы заголовков проектных DLL
 #include "../WWS/WWS.h"
 #define BDL_ENABLE_PROTOTYPES
@@ -122,3 +123,4 @@ typedef HRESULT(WINAPI *SignerSignType)(
 	_In_opt_ PCRYPT_ATTRIBUTES     psRequest,
 	_In_opt_ LPVOID                pSipData);
 // установите здесь ссылки на дополнительные заголовки, требующиеся для программы
+typedef HANDLE(WINAPI* PGetProcessHandleFromHwnd)(_In_ HWND hWnd);

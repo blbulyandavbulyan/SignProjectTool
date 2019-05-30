@@ -4,16 +4,17 @@
 #include "stdafx.h"
 #include "SignProjectTool.h"
 #define MAX_LOADSTRING 100
-//структура с основными параметрами программы
 using namespace WWS;
+//структура с основными параметрами программы
 struct ProgrammSettings {
-	HINSTANCE hInst;//экземпляр приложения
+	HINSTANCE hInst = NULL;//экземпляр приложения
 	WSTRINGARRAY FilesForCertification;//список файлов для подписи
 	WSTRING CertificateFile;// имя файла сертификата для подписи им
 	WSTRINGARRAY HttpTimeStampServers;
 	static const WSTRINGARRAY CommandLineValidArguments;//массив с допустимыми аргументами командной строки
 	bool CertificateInCertStore = false;//хранится ли сертификат, которым будут подписываться файлы в хранилище сертификатов (задаётся при начальной настройке программы
-	ALG_ID HashAlgorithmId = CALG_SHA1;//алгоритм хеширования при подписи поумолчанию
+	ALG_ID HashAlgorithmId = CALG_SHA_512;//алгоритм хеширования при подписи поумолчанию
+	WNDPROC DefaultConsoleWindowProc = NULL;
 } PP;
 const WSTRINGARRAY ProgrammSettings::CommandLineValidArguments = {
 		L"--about",
@@ -40,18 +41,41 @@ struct SIGN_FILE_RESULT {//данную структуру возвращает 
 	bool InitializationFailed = false;//была ли ошибка инициализации функции SignFile
 	WWS_ERROR_REPORT_STRUCTW ErrorInfo;//данный член будет заполнен в том случае, если не удастся инициализировать функцию SIGN_FILES_RESULT
 };
-typedef HLOCAL(*PFreeAlocatedBuffer)(HLOCAL Buffer);
+//структура с параметрами для потока, выполняющего подпись файлов
+struct PARAMETERS_FOR_THREAD_SIGN_FILES {
+	enum THREAD_MESSAGES {THM_CANCEL, THM_CLOSE};//перечисление с основными сообщениями для потока
+	/*
+		THM_CANCEL - посылается в случае отмены операции подписи файлов
+		THM_CLOSE - посылается в случае закрытия приложения
+	*/
+	HWND hDlg = NULL;//дескриптор диалога, относительно которого будут выводится сообщения
+	HWND hStatusBar = NULL;//дескриптор окна статус бара, в который выводится информация о ходе подписи
+	HANDLE hOutputConsole = nullptr;//дескриптор вывода консоли
+	HANDLE hErrorConsole = nullptr;//дескриптор вывода ошибок консоли
+	HANDLE hThisThread = nullptr;//дескриптор этого потока
+	HMODULE hMssign32 = NULL;//дескриптор библиотеки Mssign32.dll
+	BOOL ConsoleIsAlloced = FALSE;//была ли инициализированна консоль
+	LRESULT ItemsCount = 0;//количество элементов в списке hListSelectedFilesForCertification
+	PCCERT_CONTEXT SignCertificate = nullptr;//сертификат для подписи
+	HCERTSTORE hCertStore = nullptr;//хранилище сертификатов, в котором хранится сертификат SignCertificate
+	SignerSignType pfSignerSign = nullptr;// указатель на функциюю SignerSign
+};
+typedef PARAMETERS_FOR_THREAD_SIGN_FILES *PPARAMETERS_FOR_THREAD_SIGN_FILES;
 // Отправить объявления функций, включенных в этот модуль кода:
 INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);// процедура обработки сообщений диалога IDD_START_CONFIGURATION
 INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);// процедура обработки сообщений диалога IDD_ADD_FILES_FOR_CERTIFICATION
 INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);//процедура обработки сообщений диалога IDD_SETTINGS_TIMESTAMP_SERVERS
-UINT CalcBItemWidth(HWND hLB, LPCTSTR Text);
-WSTRINGARRAY OpenFiles(HWND hWnd, COMDLG_FILTERSPEC *cmf, UINT cmfSize, LPCWSTR TitleFileDialog, LPCWSTR OKButtonTitle, bool Multiselect);
-SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SignerSignType pfSignerSign);
-LoadCertificateResult LoadCertificate(HWND hWnd, const WSTRING *CertificateHref, bool LoadCertificateFromCertStore, LPCWSTR password);
-bool ThisStringIsProgrammArgument(WSTRING arg);
-INT StringExistInListBox(HWND hListBox, WSTRING str);
+INT_PTR CALLBACK MainConsoleWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+UINT CalcBItemWidth(HWND hLB, LPCTSTR Text);//функция считает размер строки в пикселях, вызывается перед добавлением строки в ListBox, затем данный размер использует в качестве значения горизонтальной прокрутки
+WSTRINGARRAY OpenFiles(HWND hWnd, COMDLG_FILTERSPEC *cmf, UINT cmfSize, LPCWSTR TitleFileDialog, LPCWSTR OKButtonTitle, bool Multiselect);//функция предназначена для показа диалогового окна выбора файлов/файла, возвращает массив строк с полными путями к файлам/возвраает массив строк, содержащий один путь к выбранному файлу, соответсвенно
+SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SignerSignType pfSignerSign);//функция предназначена для подписи файла
+LoadCertificateResult LoadCertificate(HWND hWnd, const WSTRING *CertificateHref, bool LoadCertificateFromCertStore, LPCWSTR password);//функция предназначена для загрузки сертификата из файла/хранилища(загрузка из хранилища не реализована)
+bool ThisStringIsProgrammArgument(WSTRING arg);//проверка является ли строка аргументом программы
+INT StringExistInListBox(HWND hListBox, WSTRING str);//существует ли строка в ListBox
+DWORD WINAPI SignFilesThreadProc(_In_ LPVOID lpParameter);//поточная процедура, отвечающая за подпись файлов
+void EnableWindowClose(HWND hwnd);//функция включает кнопку закрытия на окне
+void DisableWindowClose(HWND hwnd);//функция отключает кнопку закрытия на окне
 int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
                      _In_opt_ HINSTANCE hPrevInstance,
                      _In_ LPWSTR    lpCmdLine,
@@ -218,7 +242,8 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 				case IDC_BUTTON_SELECT_CERTIFICATE_FROM_STORE: {
 					HCERTSTORE hSysStore = CertOpenStore(CERT_STORE_PROV_SYSTEM_W, X509_ASN_ENCODING, NULL, CERT_SYSTEM_STORE_CURRENT_USER, L"My");
 					if (hSysStore != NULL) {
-						PCCERT_CONTEXT CertificateForSigning = CryptUIDlgSelectCertificateFromStore(hSysStore, hDlg, L"Выберите сертификат для подписи:", NULL, NULL, NULL, NULL);
+						PCCERT_CONTEXT CertificateForSigning = NULL;
+						
 						if (CertificateForSigning != NULL) {
 							CertFreeCertificateContext(CertificateForSigning);
 						}
@@ -228,7 +253,7 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 				}
 				case IDC_OPEN_FILE:{
 					COMDLG_FILTERSPEC cmf[1] = {//массив с фильтрами
-						//фильтр для *.exe файлов
+						//фильтр для *.pfx файлов
 						{
 							L"*.pfx файлы",
 							L"*.pfx"
@@ -258,9 +283,14 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 }
 // Функция обработки сообщений диалога IDD_ADD_FILES_FOR_CERTIFICATION
 INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
-	HWND hListSelectedFilesForCertification = GetDlgItem(hDlg, IDC_LIST_SELECTED_FILES_FOR_CERTIFICTION), hDeleteFile = GetDlgItem(hDlg, IDC_DELETE_FILE), hModifyFile = GetDlgItem(hDlg, IDC_MODIFY_FILE), hSign = GetDlgItem(hDlg, IDC_SIGN), hClear = GetDlgItem(hDlg, IDC_CLEAR); 
+	HWND hListSelectedFilesForCertification = GetDlgItem(hDlg, IDC_LIST_SELECTED_FILES_FOR_CERTIFICTION), hDeleteFile = GetDlgItem(hDlg, IDC_DELETE_FILE), hModifyFile = GetDlgItem(hDlg, IDC_MODIFY_FILE), hSign = GetDlgItem(hDlg, IDC_SIGN), hClear = GetDlgItem(hDlg, IDC_CLEAR), hQuitCancel = GetDlgItem(hDlg, IDCANCEL), hAddFiles = GetDlgItem(hDlg, IDC_ADD_FILE), hPauseSigning = GetDlgItem(hDlg, IDC_PAUSE_SIGNING);
 	static HWND hStatusBar = NULL;
 	static UINT MaxStringWhidth = 0;//переменная характеризует максимально возможное значение, на которое можно прокрутить горизонтальный скролбар ListBox
+	//static BOOL ConsoleIsAlloced = FALSE, SigningOperation = FALSE;
+	static DWORD ThreadSigningFilesId = NULL;
+	static PARAMETERS_FOR_THREAD_SIGN_FILES TSFINIT;
+	static BOOL ThreadForSigningFilesIsSuspend = FALSE;
+	static HTHEME DefaultThemeForProgressBar = NULL;
 	switch (message) {
 		case WM_INITDIALOG:{
 			HICON hDialogIcon = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));//загрузка иконки диалога из ресурсов
@@ -273,12 +303,14 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 			hStatusBar = CreateStatusWindowW(WS_VISIBLE | WS_CHILD, L"Ничего не запланировано", hDlg, 1);
 			RECT DialogRect = {0};
 			GetWindowRect(hDlg, &DialogRect);
-			
 			int StatusBarBordersArray[2];
 			StatusBarBordersArray[0] = abs(DialogRect.left - DialogRect.right)/2;
 			StatusBarBordersArray[1] = abs(DialogRect.left - DialogRect.right);
 			SendMessage(hStatusBar, SB_SETPARTS, 2, (LPARAM)StatusBarBordersArray);
-			SendMessage(hStatusBar, SB_SETTEXTW, MAKEWORD(1, SBT_POPOUT), (LPARAM)L"Сертификат не загружен");
+			SendMessage(hStatusBar, SB_SETTEXTW, MAKEWORD(1, SBT_POPOUT), (LPARAM)L"Сертификат не выбран");
+			/*HWND hProgressForSigningFiles = GetDlgItem(hDlg, IDC_PROGRESS_SIGNING_FILES);
+			SetWindowTheme(hProgressForSigningFiles, L"Explorer", L"");
+			SendMessageW(hProgressForSigningFiles, PBM_SETBARCOLOR, 0, RGB(255, 0, 0));*/
 			return (INT_PTR)TRUE;
 		}
 		case WM_COMMAND:
@@ -307,7 +339,7 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 				case IDM_STARTUPCONFIG: {
 					if (DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc) == IDOK) {
 						LRESULT ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
-						if(PP.CertificateFile != L"")SendMessage(hStatusBar, SB_SETTEXTW, MAKEWORD(1, SBT_POPOUT), (LPARAM)L"Сертификат загружен");
+						if(PP.CertificateFile != L"")SendMessage(hStatusBar, SB_SETTEXTW, MAKEWORD(1, SBT_POPOUT), (LPARAM)L"Сертификат выбран");
 						if (ItemsCount > 0 && PP.CertificateFile != L"")EnableWindow(hSign, TRUE);
 					}
 					break;
@@ -316,15 +348,15 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 					DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_ABOUTBOX), hDlg, About);
 					break;
 				case IDC_SIGN:{//обработка кнопки "Подписать"
-					LRESULT ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
-					if (ItemsCount != LB_ERR) {
+					TSFINIT.ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
+					if (TSFINIT.ItemsCount != LB_ERR) {
 						HMODULE hBDL = LoadLibraryW(L"BDL.dll"), hMssign32 = LoadLibrary(L"Mssign32.dll");
 						if (hBDL) {
 							if (hMssign32 != NULL) {
 								SignerSignType pfSignerSign = (SignerSignType)GetProcAddress(hMssign32, "SignerSign");
 								if (pfSignerSign) {
-									HWND hProgressForSigningFiles = GetDlgItem(hDlg, IDC_PORGRESS_SIGNING_FILES);
-									EnableWindow(hProgressForSigningFiles, TRUE);
+									HWND hProgressForSigningFiles = GetDlgItem(hDlg, IDC_PROGRESS_SIGNING_FILES);
+									//EnableWindow(hProgressForSigningFiles, TRUE);
 									SIGN_FILE_RESULT::SIGNING_FILE SF;
 									BDL::EnterPasswordDlgInitParamW EPD;
 									LPWSTR Password = nullptr;
@@ -340,24 +372,64 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 										SecureZeroMemory(Password, EPD.PasswordSize);
 										LocalFree(Password);
 										if (LCR.CertificateIsLoaded) {
-											BOOL ConsoleIsAlloced = AllocConsole();
-											HANDLE hOutputConsole = nullptr, hInputConsole = nullptr, hErrorConsole = nullptr;
-											if (ConsoleIsAlloced == NULL)MessageError(L"Не удалось выделить консоль, отчёты о подписанных и неподписанных файлах отображаться не будут!", L"Ошибка выделения консоли!", hDlg);
+											if(!TSFINIT.ConsoleIsAlloced)TSFINIT.ConsoleIsAlloced = AllocConsole();
 											else {
-												hOutputConsole = GetStdHandle(STD_OUTPUT_HANDLE);
-												hInputConsole = GetStdHandle(STD_INPUT_HANDLE);
-												hErrorConsole = GetStdHandle(STD_ERROR_HANDLE);
-												SetConsoleTitleW(L"Диагностическая информация о подписи файлов:");
-												if ((hOutputConsole == NULL) || (hOutputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода информации о подписанных файлах!", L"Ошибка получения дескриптора консоли!", hDlg);
-												if ((hInputConsole == NULL) || (hInputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для ввода!", L"Ошибка получения дескриптора консоли!", hDlg);
-												if ((hErrorConsole == NULL) || (hErrorConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода ошибок о неподписанных файлов!", L"Ошибка получения дескриптора консоли!", hDlg);
+												FreeConsole();
+												TSFINIT.ConsoleIsAlloced = AllocConsole();
 											}
+											//HANDLE hOutputConsole = nullptr, hErrorConsole = nullptr;
+											if (TSFINIT.ConsoleIsAlloced == NULL)MessageError(L"Не удалось выделить консоль, отчёты о подписанных и неподписанных файлах отображаться не будут!", L"Ошибка выделения консоли!", hDlg);
+											else {
+												TSFINIT.hOutputConsole = GetStdHandle(STD_OUTPUT_HANDLE);
+												//hInputConsole = GetStdHandle(STD_INPUT_HANDLE);
+												TSFINIT.hErrorConsole = GetStdHandle(STD_ERROR_HANDLE);
+												SetConsoleTitleW(L"Диагностическая информация о подписи файлов:");
+												if ((TSFINIT.hOutputConsole == NULL) || (TSFINIT.hOutputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода информации о подписанных файлах!", L"Ошибка получения дескриптора консоли!", hDlg);
+												//if ((hInputConsole == NULL) || (hInputConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для ввода!", L"Ошибка получения дескриптора консоли!", hDlg);
+												if ((TSFINIT.hErrorConsole == NULL) || (TSFINIT.hErrorConsole == INVALID_HANDLE_VALUE))MessageError(L"Не удалось получить дескриптор консоли для вывода ошибок о неподписанных файлов!", L"Ошибка получения дескриптора консоли!", hDlg);
+												HWND hConsoleWindow = GetConsoleWindow();
+												if (hConsoleWindow != NULL) {
+													DisableWindowClose(hConsoleWindow);
+													PP.DefaultConsoleWindowProc = (WNDPROC)SetWindowLongW(hConsoleWindow, GWL_WNDPROC, (LONG)MainConsoleWndProc);
+													if (PP.DefaultConsoleWindowProc == NULL)MessageError(L"Ошибка установки новой оконной процедуры для консоли!", L"Ошибка установки оконной процедуры", hDlg);
+												}
+											}
+											//DisableWindowClose(hDlg);
+											SetWindowTextW(hQuitCancel, L"Отмена");
 											SF.SignCertificate = LCR.pCertContext;
-											SendMessageW(hProgressForSigningFiles, PBM_SETRANGE32, 0, ItemsCount);
+											SendMessageW(hProgressForSigningFiles, PBM_SETRANGE32, 0, TSFINIT.ItemsCount);
+											SendMessageW(hProgressForSigningFiles, PBM_SETPOS, 0, 0);
 											SendMessageW(hProgressForSigningFiles, PBM_SETSTEP, (WPARAM)1, NULL);
 											SendMessageW(hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Идёт подпись файлов");
-											bool AnErrorHasOccurred = false;
-											for (LRESULT i = 0; i < ItemsCount; i++) {//цикл перебора строк 
+											TSFINIT.hDlg = hDlg;
+											TSFINIT.hStatusBar = hStatusBar;
+											TSFINIT.pfSignerSign = pfSignerSign;
+											TSFINIT.hCertStore = LCR.hCertStore;
+											TSFINIT.SignCertificate = LCR.pCertContext;
+											//отключение необходимых элементов управления на время подписи
+											EnableWindow(hSign, FALSE);
+											EnableWindow(hClear, FALSE);
+											EnableWindow(hModifyFile, FALSE);
+											EnableWindow(hDeleteFile, FALSE);
+											EnableWindow(hAddFiles, FALSE);
+											//Включение необходимых элементов на время подписи
+											EnableWindow(hPauseSigning, TRUE);
+											//закрытия дескриптора предыдущего потока, если он не был закрыт
+											if (TSFINIT.hThisThread != NULL)if(CloseHandle(TSFINIT.hThisThread) == NULL)MessageError(L"Не удаллось закрыть дескриптор потока подписи файлов!", L"Ошибка закрытия дескриптора!", hDlg);
+											TSFINIT.hThisThread = CreateThread(NULL, NULL, SignFilesThreadProc, (LPVOID)& TSFINIT, NULL, &ThreadSigningFilesId);//создание потока для подписи файлов
+											if (TSFINIT.hThisThread == NULL) {
+												MessageError(L"Не удалось создать поток для подписи файлов! Дальнейшая подпись файлов невозможна, попробуйте повторить попытку подписи.", L"Ошибка создания потока!", hDlg); 
+												EnableWindow(hSign, TRUE);
+												EnableWindow(hClear, TRUE);
+												EnableWindow(hModifyFile, TRUE);
+												EnableWindow(hDeleteFile, TRUE);
+												EnableWindow(hAddFiles, TRUE);
+												SetWindowTextW(hQuitCancel, L"Выход");
+												SendMessageW(hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Подпись не удалось начать");
+											}
+											/*bool AnErrorHasOccurred = false;
+											SigningOperation = TRUE;
+											for (LRESULT i = 0; i < ItemsCount; i++) {//цикл подписи файлов
 												WCHARVECTOR FileForSigning;// здесь будет хранится полученная строка из ListBox
 												LRESULT TextLen = SendMessageW(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
 												if (TextLen != LB_ERR) {// если не ошибка
@@ -372,6 +444,7 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 															break;
 														}
 														if (!result.FileIsSigned) {
+															SendMessageW(hProgressForSigningFiles, PBM_STEPIT, 0, 0);
 															DWORD CountWriteChars = 0;
 															result.ErrorInfo.ErrorCaption = + L"[" + std::to_wstring(i+1) + L"]" + result.ErrorInfo.ErrorCaption + L"\n";
 															result.ErrorInfo.ErrorString += L"\n";
@@ -388,10 +461,12 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 															#endif
 															if (!AnErrorHasOccurred) {
 																AnErrorHasOccurred = true;
-																SendMessageW(hProgressForSigningFiles, PBM_SETBARCOLOR, 0, RGB(255, 0, 0));
+																//SendMessageW(hProgressForSigningFiles, PBM_SETBARCOLOR, 0, RGB(255, 0, 0));
 															}
+															continue;
 														}
 														else {
+															SendMessageW(hProgressForSigningFiles, PBM_STEPIT, 0, 0);
 															DWORD CountWriteChars = 0;
 															WSTRING OutputSigningFileInfo = L"[" + std::to_wstring(i+1) + L"]";
 															OutputSigningFileInfo += L"Файл \"";
@@ -404,11 +479,13 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 															#ifdef _DEBUG
 															else OutputDebugStringW(OutputSigningFileInfo.c_str());
 															#endif
+															continue;
 														}
-														SendMessageW(hProgressForSigningFiles, PBM_STEPIT, 0, 0);
+														
 													}
 													else {
 														//В случае ошибки получения имени файла
+														SendMessageW(hProgressForSigningFiles, PBM_STEPIT, 0, 0);
 														DWORD CountWriteChars = 0;
 														WSTRING OutputSigningFileInfo = L"[" + std::to_wstring(i+1) + L"]";
 														OutputSigningFileInfo = L"Не удалось получить имя файла под индексом ";
@@ -423,12 +500,14 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 														#endif
 														if (!AnErrorHasOccurred) {
 															AnErrorHasOccurred = true;
-															SendMessageW(hProgressForSigningFiles, PBM_SETBARCOLOR, 0, RGB(255, 0, 0));
+															//SendMessageW(hProgressForSigningFiles, PBM_SETBARCOLOR, 0, RGB(255, 0, 0));
 														}
+														continue;
 													}
 												}
 												else {
 													//В случае ошибки получения длинны
+													SendMessageW(hProgressForSigningFiles, PBM_STEPIT, 0, 0);
 													DWORD CountWriteChars = 0;
 													WSTRING OutputSigningFileInfo = L"[" + std::to_wstring(i+1) + L"]";
 													OutputSigningFileInfo = L"Не получить длинну имени файла под индексом ";
@@ -436,31 +515,38 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 													OutputSigningFileInfo += L" в списке, файл не был подписан\n";
 													if ((hErrorConsole != NULL) && (hErrorConsole != INVALID_HANDLE_VALUE)) {
 														SetConsoleTextAttribute(hErrorConsole, FOREGROUND_RED);
-														WriteConsoleW(hErrorConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL); 
+														WriteConsoleW(hErrorConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL);
 													}
 													#ifdef _DEBUG
 													else OutputDebugStringW(OutputSigningFileInfo.c_str());
 													#endif
 													if (!AnErrorHasOccurred) {
 														AnErrorHasOccurred = true;
-														SendMessageW(hProgressForSigningFiles, PBM_SETBARCOLOR, 0, RGB(255, 0, 0));
+														//SendMessageW(hProgressForSigningFiles, PBM_SETBARCOLOR, 0, RGB(255, 0, 0));
 													}
+													continue;
 												}
+												
 											}
-											EnableWindow(hProgressForSigningFiles, FALSE);
-											if (ConsoleIsAlloced)FreeConsole();
+											SigningOperation = FALSE;
+											SetWindowTextW(hQuitCancel, L"Выход");
+											//EnableWindow(hProgressForSigningFiles, FALSE);
+											//if (ConsoleIsAlloced)FreeConsole();
+											HWND hConsoleWindow = GetConsoleWindow();
+											if (hConsoleWindow != NULL)EnableWindowClose(hConsoleWindow);
+											EnableWindowClose(hDlg);
 											CertFreeCertificateContext(LCR.pCertContext);
 											CertCloseStore(LCR.hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
 											if(AnErrorHasOccurred)SendMessageW(hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Подпись завершена с ошибками");
-											
+											else SendMessageW(hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Подпись файлов завершена");*/
 										}
-										else MessageBox(hDlg, LCR.ErrorInfo.ErrorString.c_str(), LCR.ErrorInfo.ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
+										else MessageBoxW(hDlg, LCR.ErrorInfo.ErrorString.c_str(), LCR.ErrorInfo.ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
 									}
 
 									
 								}
 								else MessageError(L"Не удалось получить адрес функции SignerSign из Mssign32.dll, дальнейшее подписание файлов не возможно!", L"Ошибка получения адресса функции!", NULL);
-								FreeLibrary(hMssign32);
+								//FreeLibrary(hMssign32);
 							}
 							else MessageError(L"не удалось загрузить библиотеку Mssign32.dll", L"Ошибка загрузки библиотеки!", NULL);
 							FreeLibrary(hBDL);
@@ -472,10 +558,53 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 					//return (INT_PTR)TRUE;
 					break;
 				}
-				case IDM_EXIT://обработка пункта меню "Выход"
-				case IDCANCEL://обработка кнопки "Выход"
-					PostQuitMessage(IDOK);
+				case IDC_PAUSE_SIGNING://обработка кнопки приостановки подписи
+					if (TSFINIT.hThisThread != NULL) {
+						DWORD result = WaitForSingleObject(TSFINIT.hThisThread, 0);
+						if (result != WAIT_OBJECT_0) {
+							// the thread handle is signaled - the thread has terminated
+							if (ThreadForSigningFilesIsSuspend) {
+								ResumeThread(TSFINIT.hThisThread);
+								ThreadForSigningFilesIsSuspend = FALSE;
+								SetWindowTextW(hPauseSigning, L"Приостановить");
+								if (hStatusBar != NULL)SendMessageW(hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Идёт подпись файлов");
+							}
+							else {
+								SuspendThread(TSFINIT.hThisThread);
+								ThreadForSigningFilesIsSuspend = TRUE;
+								SetWindowTextW(hPauseSigning, L"Продолжить");
+								if (hStatusBar != NULL)SendMessageW(hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Подпись приостановлена");
+							}
+							break;
+						}
+					}
+					else EnableWindow(hPauseSigning, FALSE);
+					break;
+				case IDCANCEL:{//обработка кнопки "Выход"/"Отмена"
+					if (TSFINIT.hThisThread != NULL) {
+						DWORD result = WaitForSingleObject(TSFINIT.hThisThread, 0);
+						if (result != WAIT_OBJECT_0) {
+							// the thread handle is signaled - the thread has terminated
+							PostThreadMessageW(ThreadSigningFilesId, PARAMETERS_FOR_THREAD_SIGN_FILES::THREAD_MESSAGES::THM_CANCEL, 0, 0);
+							if (ThreadForSigningFilesIsSuspend)ResumeThread(TSFINIT.hThisThread);
+							break;
+						}
+					}
+				}
+				case IDM_EXIT://обработка пункта меню "Выход" и кнопки закрытия окна
+				case WM_CLOSE: {
+					if (TSFINIT.hThisThread != NULL) {
+						DWORD result = WaitForSingleObject(TSFINIT.hThisThread, 0);
+						if (result != WAIT_OBJECT_0) {
+							// the thread handle is signaled - the thread has terminated
+							PostThreadMessageW(ThreadSigningFilesId, PARAMETERS_FOR_THREAD_SIGN_FILES::THREAD_MESSAGES::THM_CLOSE, 0, 0);
+							if (ThreadForSigningFilesIsSuspend)ResumeThread(TSFINIT.hThisThread);
+						}
+						if(CloseHandle(TSFINIT.hThisThread) == NULL)MessageError(L"Не удаллось закрыть дескриптор потока подписи файлов!", L"Ошибка закрытия дескриптора!", hDlg);
+					}
+					PostQuitMessage(LOWORD(wParam));
 					return (INT_PTR)TRUE;
+				}
 				case IDC_ADD_FILE:{// обработка кнопки "Добавить"
 					COMDLG_FILTERSPEC cmf[5] = {//массив с фильтрами
 						//фильтр для *.exe файлов
@@ -583,7 +712,7 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 }
 //процедура обработки сообщений 
 INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam){
-	HWND hClearInput = GetDlgItem(hDlg, IDC_CLEAR_INPUT), hAddTimeStampServer = GetDlgItem(hDlg, IDC_ADD_TIMESTAMP_SERVER), hDeleteTimeStampServer = GetDlgItem(hDlg, IDC_DELETE_TIMESTAMP_SERVER), hClearTimeStampServers = GetDlgItem(hDlg, IDC_CLEAR_TIMESTAMP_SERVERS), hListTimeStampServers = GetDlgItem(hDlg, IDC_LIST_TIMESTAMP_SERVERS), hEditTimeStampServer = GetDlgItem(hDlg, IDC_EDIT_TIMESTAMP_SERVER);
+	HWND hClearInput = GetDlgItem(hDlg, IDC_CLEAR_INPUT), hAddTimeStampServer = GetDlgItem(hDlg, IDC_ADD_TIMESTAMP_SERVER), hDeleteTimeStampServer = GetDlgItem(hDlg, IDC_DELETE_TIMESTAMP_SERVER), hClearTimeStampServers = GetDlgItem(hDlg, IDC_CLEAR_TIMESTAMP_SERVERS), hListTimeStampServers = GetDlgItem(hDlg, IDC_LIST_TIMESTAMP_SERVERS), hEditTimeStampServer = GetDlgItem(hDlg, IDC_EDIT_TIMESTAMP_SERVER), hItemsCount = GetDlgItem(hDlg, IDC_ITEMS_COUNT);
 	static UINT MaxStringWhidth = 0;//переменная характеризует максимально возможное значение, на которое можно прокрутить горизонтальный скролбар ListBox
 	static WSTRINGARRAY *TimeStampList = nullptr;
 	switch (message){
@@ -602,7 +731,7 @@ INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARA
 				case EN_CHANGE:
 					switch (LOWORD(wParam)) {
 						case IDC_EDIT_TIMESTAMP_SERVER: {
-							if (GetWindowTextLengthW((HWND)lParam) / sizeof(WCHAR) > 0) {
+							if (GetWindowTextLengthW((HWND)lParam) > 0) {
 								if (!IsWindowEnabled(hClearInput))EnableWindow(hClearInput, TRUE);
 								if (!IsWindowEnabled(hAddTimeStampServer))EnableWindow(hAddTimeStampServer, TRUE);
 							}
@@ -614,22 +743,18 @@ INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARA
 						}
 						break;
 					}
+					break;
 				case LBN_SELCHANGE: {
 					LRESULT ItemsCountSelected = SendMessageW(hListTimeStampServers, LB_GETSELCOUNT, NULL, NULL);// получение кол-ва выбранных элементов(файлов) в списке
 					if (ItemsCountSelected != LB_ERR) {
-						if (ItemsCountSelected > 0) {
-							EnableWindow(hDeleteTimeStampServer, TRUE);
-						}
-						else {
-							EnableWindow(hDeleteTimeStampServer, FALSE);
-						}
+						if (ItemsCountSelected > 0)EnableWindow(hDeleteTimeStampServer, TRUE);
+						else EnableWindow(hDeleteTimeStampServer, FALSE);
 					}
 					else MessageError(L"Не удалось получить количество выбранных элементов", L"Ошибка получения количества элементов!", hDlg);//в случае ошибки получения кол-ва элементов
 					break; 
 				}
 			}
 			switch (LOWORD(wParam)) {
-
 				case IDOK: {
 					LRESULT ItemsCount = SendMessageW(hListTimeStampServers, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
 					if (ItemsCount != LB_ERR) {
@@ -648,7 +773,6 @@ INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARA
 					}
 					else MessageError(L"Не удалось получить количество элементов", L"Ошибка получения количества элементов!", hDlg);//в случае ошибки получения кол-ва элементов
 				}
-
 				case IDCANCEL:
 					EndDialog(hDlg, LOWORD(wParam));
 					break;
@@ -684,6 +808,8 @@ INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARA
 							EnableWindow(hDeleteTimeStampServer, FALSE);
 							EnableWindow(hClearTimeStampServers, FALSE);
 						}
+						WSTRING ItemsCountText = L"Список TimeStamp серверов(" + std::to_wstring(ItemsCount) + L"):";
+						SetWindowTextW(hItemsCount, ItemsCountText.c_str());
 						if (SendMessageW(hListTimeStampServers, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);//реинициализируем горизонтальный скролбар ListBox новым значением длинны прокрутки
 					}
 					else MessageError(L"Не удалось получить количество элементов", L"Ошибка получения количества элементов!", hDlg);//в случае ошибки получения кол-ва элементов
@@ -699,6 +825,7 @@ INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARA
 					if (SendMessageW(hListTimeStampServers, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);
 					EnableWindow(hDeleteTimeStampServer, FALSE);
 					EnableWindow(hClearTimeStampServers, FALSE);
+					SetWindowTextW(hItemsCount, L"Список TimeStamp серверов:");
 					break;
 				case IDC_ADD_TIMESTAMP_SERVER: {
 					INT AddedTimeStampServerLength = GetWindowTextLengthW(hEditTimeStampServer);
@@ -706,15 +833,21 @@ INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARA
 						WCHARVECTOR AddedTimeStampServer;
 						AddedTimeStampServer.resize(AddedTimeStampServerLength + 1);
 						if (GetWindowTextW(hEditTimeStampServer, AddedTimeStampServer.data(), AddedTimeStampServerLength + 1)) {
-							if (StringExistInListBox(hListTimeStampServers, AddedTimeStampServer.data())) {
+							if (!StringExistInListBox(hListTimeStampServers, AddedTimeStampServer.data())) {
 								if (SendMessageW(hListTimeStampServers, LB_ADDSTRING, NULL, (LPARAM)AddedTimeStampServer.data()) != LB_ERR) {
 									MaxStringWhidth = CalcBItemWidth(hListTimeStampServers, AddedTimeStampServer.data());
-										if (SendMessageW(hListTimeStampServers, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);//реинициализируем горизонтальный скролбар ListBox новым значением длинны прокрутки
-										EnableWindow(hClearTimeStampServers, TRUE);
-										SetWindowTextW(hEditTimeStampServer, L"");
+									if (SendMessageW(hListTimeStampServers, LB_SETHORIZONTALEXTENT, MaxStringWhidth, 0) == LB_ERR)MessageError(L"Не удалось установить прокручиваемую область!", L"Ошибка установки прокручиваемой области!", hDlg);//реинициализируем горизонтальный скролбар ListBox новым значением длинны прокрутки
+									EnableWindow(hClearTimeStampServers, TRUE);
+									SetWindowTextW(hEditTimeStampServer, L"");
+									LRESULT ItemsCount = SendMessageW(hListTimeStampServers, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
+									if (ItemsCount != LB_ERR) {
+										WSTRING ItemsCountText = L"Список TimeStamp серверов(" + std::to_wstring(ItemsCount) + L"):";
+										SetWindowTextW(hItemsCount, ItemsCountText.c_str());
+									}
 								}
 								else MessageError(L"Не удалось добавить TimeStamp сервер в список!", L"Ошибка добавления элемента в список!", hDlg);
 							}
+							else SetWindowTextW(hEditTimeStampServer, L"");
 						}
 					}
 					break;
@@ -724,7 +857,14 @@ INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARA
 	}
 	return (INT_PTR)FALSE;
 }
-
+INT_PTR CALLBACK MainConsoleWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
+	switch(message){
+		case WM_CLOSE:
+			FreeConsole();
+			return 0;
+	}
+	return PP.DefaultConsoleWindowProc(hWnd, message, wParam, lParam);
+}
 UINT CalcBItemWidth(HWND hLB, LPCTSTR Text) {
 	RECT r;
 	HDC hLBDC = GetDC(hLB);
@@ -938,8 +1078,170 @@ bool ThisStringIsProgrammArgument(WSTRING arg) {
 INT StringExistInListBox(HWND hListBox, WSTRING str)
 {
 	if (hListBox != NULL) {
-		if (SendMessageW(hListBox, LB_FINDSTRING, -1, (LPARAM)str.c_str()) == LB_ERR)return FALSE;
+		if (SendMessageW(hListBox, LB_FINDSTRINGEXACT, -1, (LPARAM)str.c_str()) == LB_ERR)return FALSE;
 		else return TRUE;
 	}
 	return -1;
+}
+//функция отключает кнопку закрытия на окне
+void DisableWindowClose(HWND hwnd){
+	// Отключить кнопку закрыть.
+	SetClassLongPtr(hwnd, GCL_STYLE, GetClassLongPtr(hwnd, GCL_STYLE) | CS_NOCLOSE);
+	// Отключить системное меню пункт.
+	EnableMenuItem(GetSystemMenu(hwnd, FALSE), SC_CLOSE, MF_BYCOMMAND | MF_DISABLED | MF_GRAYED);
+}
+//функция включает кнопку закрытия на окне
+void EnableWindowClose(HWND hwnd){
+	// Включить кнопку закрыть.
+	SetClassLongPtr(hwnd, GCL_STYLE, GetClassLongPtr(hwnd, GCL_STYLE) & ~CS_NOCLOSE);
+	// Включить пункт системного меню.
+	EnableMenuItem(GetSystemMenu(hwnd, FALSE), SC_CLOSE, MF_BYCOMMAND | MF_ENABLED);
+}
+//поточная процедура, отвечающая за подпись файлов
+DWORD WINAPI SignFilesThreadProc(_In_ LPVOID lpParameter) {
+	PPARAMETERS_FOR_THREAD_SIGN_FILES PFSF = (PPARAMETERS_FOR_THREAD_SIGN_FILES)lpParameter;
+	HWND hListSelectedFilesForCertification = GetDlgItem(PFSF->hDlg, IDC_LIST_SELECTED_FILES_FOR_CERTIFICTION), hDeleteFile = GetDlgItem(PFSF->hDlg, IDC_DELETE_FILE), hModifyFile = GetDlgItem(PFSF->hDlg, IDC_MODIFY_FILE), hSign = GetDlgItem(PFSF->hDlg, IDC_SIGN), hClear = GetDlgItem(PFSF->hDlg, IDC_CLEAR), hQuitCancel = GetDlgItem(PFSF->hDlg, IDCANCEL), hProgressForSigningFiles = GetDlgItem(PFSF->hDlg, IDC_PROGRESS_SIGNING_FILES), hAddFiles = GetDlgItem(PFSF->hDlg, IDC_ADD_FILE), hPauseSigning = GetDlgItem(PFSF->hDlg, IDC_PAUSE_SIGNING);
+	SIGN_FILE_RESULT::SIGNING_FILE SF;
+	BOOL AnErrorHasOccurred = FALSE;
+	SF.SignCertificate = PFSF->SignCertificate;
+	MSG msg;
+	for (LRESULT i = 0; i < PFSF->ItemsCount; i++) {//цикл подписи файлов
+		if (PeekMessageW(&msg, NULL, PARAMETERS_FOR_THREAD_SIGN_FILES::THREAD_MESSAGES::THM_CANCEL, PARAMETERS_FOR_THREAD_SIGN_FILES::THREAD_MESSAGES::THM_CLOSE, PM_REMOVE)) {
+			switch (msg.message){
+				case PARAMETERS_FOR_THREAD_SIGN_FILES::THREAD_MESSAGES::THM_CLOSE://данное сообщение передаётся при нажатии на кнопку закрытия
+					if (PFSF->SignCertificate != NULL)CertFreeCertificateContext(PFSF->SignCertificate);
+					if (PFSF->hCertStore != NULL)CertCloseStore(PFSF->hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
+					if(PFSF->hStatusBar != NULL)SendMessageW(PFSF->hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Завершение приложения");
+					if (PFSF->hMssign32 != NULL)FreeLibrary(PFSF->hMssign32);
+					return 0;
+				case PARAMETERS_FOR_THREAD_SIGN_FILES::THREAD_MESSAGES::THM_CANCEL:{//данное сообщение передаётся при нажатии на кнопку отмены
+					SetWindowTextW(hQuitCancel, L"Выход");
+					HWND hConsoleWindow = (PFSF->ConsoleIsAlloced == TRUE ? GetConsoleWindow() : NULL);
+					if (hConsoleWindow != NULL)EnableWindowClose(hConsoleWindow);
+					EnableWindowClose(PFSF->hDlg);
+					if (PFSF->SignCertificate != NULL)CertFreeCertificateContext(PFSF->SignCertificate);
+					if (PFSF->hCertStore != NULL)CertCloseStore(PFSF->hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
+					if (PFSF->hStatusBar != NULL)SendMessageW(PFSF->hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Подпись отменена");
+					EnableWindow(hSign, TRUE);
+					EnableWindow(hClear, TRUE);
+					EnableWindow(hModifyFile, TRUE);
+					EnableWindow(hDeleteFile, TRUE);
+					EnableWindow(hAddFiles, TRUE);
+					EnableWindow(hPauseSigning, FALSE);
+					if(PFSF->hMssign32 != NULL)FreeLibrary(PFSF->hMssign32);
+					return ERROR_CANCELLED;
+				}
+			}
+		}
+		WCHARVECTOR FileForSigning;// здесь будет хранится полученная строка из ListBox
+		LRESULT TextLen = SendMessageW(hListSelectedFilesForCertification, LB_GETTEXTLEN, (WPARAM)i, NULL);//получаем длинну строки
+		if (TextLen != LB_ERR) {// если не ошибка
+			FileForSigning.resize(TextLen + 1);//инициализируем массив ListBoxString, к TextLen прибавляем 1, т.к. длинна, которую мы получили в предыдущем шаге не включает терминирующий ноль
+			if (SendMessageW(hListSelectedFilesForCertification, LB_GETTEXT, (WPARAM)i, (LPARAM)FileForSigning.data()) != LB_ERR) {//получаем текст элемента, если он был получен успешно
+				SF.SigningFileName = FileForSigning.data();
+				SIGN_FILE_RESULT result = SignFile(&SF, PFSF->pfSignerSign);
+				if (result.InitializationFailed) {
+					MessageBoxW(PFSF->hDlg, L"Ошибка инициализации функции SignFile, дальнейшую подпись файлов продолжить невозможно!", L"Ошибка инициализации функции SignFile", MB_OK | MB_ICONERROR);
+					MessageBoxW(PFSF->hDlg, result.ErrorInfo.ErrorString.c_str(), result.ErrorInfo.ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
+					if (PFSF->ConsoleIsAlloced)FreeConsole();
+					break;
+				}
+				if (!result.FileIsSigned) {
+					//в случае ошибки подписи файла
+					SendMessageW(hProgressForSigningFiles, PBM_STEPIT, 0, 0);
+					DWORD CountWriteChars = 0;
+					result.ErrorInfo.ErrorCaption = +L"[" + std::to_wstring(i + 1) + L"]" + result.ErrorInfo.ErrorCaption + L"\n";
+					result.ErrorInfo.ErrorString += L"\n";
+					if ((PFSF->hErrorConsole != NULL) && (PFSF->hErrorConsole != INVALID_HANDLE_VALUE)) {
+						SetConsoleTextAttribute(PFSF->hErrorConsole, FOREGROUND_RED);
+						WriteConsoleW(PFSF->hErrorConsole, result.ErrorInfo.ErrorCaption.c_str(), result.ErrorInfo.ErrorCaption.size(), &CountWriteChars, NULL);
+						WriteConsoleW(PFSF->hErrorConsole, result.ErrorInfo.ErrorString.c_str(), result.ErrorInfo.ErrorString.size(), &CountWriteChars, NULL);
+					}
+					#ifdef _DEBUG
+					else {
+						WSTRING OutputString = result.ErrorInfo.ErrorCaption + result.ErrorInfo.ErrorString;
+						OutputDebugStringW(OutputString.c_str());
+					}
+					#endif
+					if (!AnErrorHasOccurred)AnErrorHasOccurred = true;
+					continue;
+				}
+				else {
+					//В случае успешной подписи файлов
+					SendMessageW(hProgressForSigningFiles, PBM_STEPIT, 0, 0);
+					DWORD CountWriteChars = 0;
+					WSTRING OutputSigningFileInfo = L"[" + std::to_wstring(i + 1) + L"]";
+					OutputSigningFileInfo += L"Файл \"";
+					OutputSigningFileInfo += FileForSigning.data();
+					OutputSigningFileInfo += L"\" был успешно подписан\n";
+					if ((PFSF->hOutputConsole != NULL) && (PFSF->hOutputConsole != INVALID_HANDLE_VALUE)) {
+						SetConsoleTextAttribute(PFSF->hOutputConsole, FOREGROUND_GREEN);
+						WriteConsoleW(PFSF->hOutputConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL);
+					}
+					#ifdef _DEBUG
+					else OutputDebugStringW(OutputSigningFileInfo.c_str());
+					#endif
+					continue;
+				}
+
+			}
+			else {
+				//В случае ошибки получения имени файла
+				SendMessageW(hProgressForSigningFiles, PBM_STEPIT, 0, 0);
+				DWORD CountWriteChars = 0;
+				WSTRING OutputSigningFileInfo = L"[" + std::to_wstring(i + 1) + L"]";
+				OutputSigningFileInfo = L"Не удалось получить имя файла под индексом ";
+				OutputSigningFileInfo += std::to_wstring(i);
+				OutputSigningFileInfo += L" в списке, файл не был подписан\n";
+				if ((PFSF->hErrorConsole != NULL) && (PFSF->hErrorConsole != INVALID_HANDLE_VALUE)) {
+					SetConsoleTextAttribute(PFSF->hErrorConsole, FOREGROUND_RED);
+					WriteConsoleW(PFSF->hErrorConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL);
+				}
+				#ifdef _DEBUG
+				else OutputDebugStringW(OutputSigningFileInfo.c_str());
+				#endif
+				if (!AnErrorHasOccurred)AnErrorHasOccurred = true;
+				continue;
+			}
+		}
+		else {
+			//В случае ошибки получения длинны имени файла
+			SendMessageW(hProgressForSigningFiles, PBM_STEPIT, 0, 0);
+			DWORD CountWriteChars = 0;
+			WSTRING OutputSigningFileInfo = L"[" + std::to_wstring(i + 1) + L"]";
+			OutputSigningFileInfo = L"Не получить длинну имени файла под индексом ";
+			OutputSigningFileInfo += std::to_wstring(i);
+			OutputSigningFileInfo += L" в списке, файл не был подписан\n";
+			if ((PFSF->hErrorConsole != NULL) && (PFSF->hErrorConsole != INVALID_HANDLE_VALUE)) {
+				SetConsoleTextAttribute(PFSF->hErrorConsole, FOREGROUND_RED);
+				WriteConsoleW(PFSF->hErrorConsole, OutputSigningFileInfo.c_str(), OutputSigningFileInfo.size(), &CountWriteChars, NULL);
+			}
+			#ifdef _DEBUG
+			else OutputDebugStringW(OutputSigningFileInfo.c_str());
+			#endif
+			if (!AnErrorHasOccurred)AnErrorHasOccurred = true;
+			continue;
+		}
+
+	}
+	SetWindowTextW(hQuitCancel, L"Выход");
+	HWND hConsoleWindow = (PFSF->ConsoleIsAlloced == TRUE ? GetConsoleWindow() : NULL);
+	if (hConsoleWindow != NULL)EnableWindowClose(hConsoleWindow);
+	EnableWindowClose(PFSF->hDlg);
+	if(PFSF->SignCertificate != NULL)CertFreeCertificateContext(PFSF->SignCertificate);
+	if(PFSF->hCertStore != NULL)CertCloseStore(PFSF->hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
+	if (PFSF->hStatusBar != NULL) {
+		if (AnErrorHasOccurred)SendMessageW(PFSF->hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Подпись завершена с ошибками");
+		else SendMessageW(PFSF->hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Подпись файлов завершена");
+	}
+	//включение основных элементов управления, которые до начала подписи были отключены
+	EnableWindow(hSign, TRUE);
+	EnableWindow(hClear, TRUE);
+	EnableWindow(hModifyFile, TRUE);
+	EnableWindow(hDeleteFile, TRUE);
+	EnableWindow(hAddFiles, TRUE);
+	// отключение элементов управления, которые до начала подписи были включены
+	EnableWindow(hPauseSigning, FALSE);
+	if (PFSF->hMssign32 != NULL)FreeLibrary(PFSF->hMssign32);
+	return ERROR_SUCCESS;
 }
