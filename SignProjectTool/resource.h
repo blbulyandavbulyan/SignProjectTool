@@ -12,6 +12,7 @@
 #define IDI_SIGNPROJECTTOOL             107
 #define IDI_SMALL                       108
 #define IDC_SIGNPROJECTTOOL             109
+#define ID_TOOLBAR_CONTROL_FOR_ADD_FILES_FOR_CERTIFICATION 111
 #define IDR_MAINFRAME                   128
 #define IDD_START_CONFIGURATION         129
 #define IDD_ADD_FILES_FOR_CERTIFICATION 130
@@ -46,6 +47,7 @@
 #define IDC_ITEMS_COUNT                 1028
 #define ID_32771                        32771
 #define IDM_STARTUPCONFIG               32772
+#define ID_CLOSE_CONSOLE                32773
 #define IDC_STATIC                      -1
 
 // Next default values for new objects
@@ -54,8 +56,8 @@
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
 #define _APS_NEXT_RESOURCE_VALUE        132
-#define _APS_NEXT_COMMAND_VALUE         32773
+#define _APS_NEXT_COMMAND_VALUE         32775
 #define _APS_NEXT_CONTROL_VALUE         1029
-#define _APS_NEXT_SYMED_VALUE           111
+#define _APS_NEXT_SYMED_VALUE           112
 #endif
 #endif

@@ -96,7 +96,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>$(SolutionDir)$(Configuration)\WWS.lib;$(SolutionDir)$(Configuration)\BDL.lib;%(AdditionalDependencies);Crypt32.lib;Cryptui.lib;Comctl32.lib;UxTheme.lib</AdditionalDependencies>
+      <AdditionalDependencies>$(SolutionDir)$(Configuration)\WWS.lib;$(SolutionDir)$(Configuration)\BDL.lib;%(AdditionalDependencies);Crypt32.lib;Cryptui.lib;Comctl32.lib;KtmW32.lib</AdditionalDependencies>
       <Version>
       </Version>
     </Link>
@@ -113,7 +113,7 @@
     <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>$(SolutionDir)x64\$(Configuration)\WWS.lib;$(SolutionDir)x64\$(Configuration)\BDL.lib;%(AdditionalDependencies);Crypt32.lib;Cryptui.lib;Comctl32.lib;UxTheme.lib</AdditionalDependencies>
+      <AdditionalDependencies>$(SolutionDir)x64\$(Configuration)\WWS.lib;$(SolutionDir)x64\$(Configuration)\BDL.lib;%(AdditionalDependencies);Crypt32.lib;Cryptui.lib;Comctl32.lib;KtmW32.lib</AdditionalDependencies>
       <Version>
       </Version>
     </Link>
@@ -134,7 +134,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>$(SolutionDir)$(Configuration)\WWS.lib;$(SolutionDir)$(Configuration)\BDL.lib;%(AdditionalDependencies);Crypt32.lib;Cryptui.lib;Comctl32.lib</AdditionalDependencies>
+      <AdditionalDependencies>$(SolutionDir)$(Configuration)\WWS.lib;$(SolutionDir)$(Configuration)\BDL.lib;%(AdditionalDependencies);Crypt32.lib;Cryptui.lib;Comctl32.lib;KtmW32.lib</AdditionalDependencies>
       <Version>
       </Version>
     </Link>
@@ -155,7 +155,7 @@
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
-      <AdditionalDependencies>$(SolutionDir)x64\$(Configuration)\WWS.lib;%(AdditionalDependencies);Crypt32.lib;Cryptui.lib</AdditionalDependencies>
+      <AdditionalDependencies>$(SolutionDir)x64\$(Configuration)\WWS.lib;%(AdditionalDependencies);Crypt32.lib;Cryptui.lib;KtmW32.lib</AdditionalDependencies>
       <Version>
       </Version>
     </Link>

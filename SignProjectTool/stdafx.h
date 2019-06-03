@@ -13,7 +13,8 @@
 #include <ShObjIdl.h>
 #include <wincrypt.h>
 #include <cryptuiapi.h>
-#include <Uxtheme.h>
+//#include <Uxtheme.h>
+#include <ktmw32.h>
 // Файлы заголовков среды выполнения C
 #include <stdlib.h>
 #include <malloc.h>
