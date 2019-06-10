@@ -20,6 +20,7 @@
 #define IDC_CERT_FILE                   1001
 #define IDC_CERT_STORE_NAME             1002
 #define IDC_OPEN_FILE                   1004
+#define IDC_OPEN_CERT_FILE              1004
 #define IDC_LIST_SELECTED_FILES_FOR_CERTIFICTION 1005
 #define IDC_ADD_FILE                    1006
 #define IDC_DELETE_FILE                 1007

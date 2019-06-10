@@ -4,13 +4,17 @@
 #include "stdafx.h"
 #include "SignProjectTool.h"
 #define MAX_LOADSTRING 100
+//Макрос, определяющий корневую ветку в реестре для данной программы, он будет использоваться относительно HKEY_CURRENT_USER
+#define ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL L"Software\\Blbulyan Software\\SignProjectTool"
 using namespace WWS;
-//структура с основными параметрами программы
+//данные функции используются в структурах, которые описаны ниже, поэтому их прототипы на самом верху
 bool CheckBit(unsigned word, unsigned bit);
+bool FileReadebleExists(LPCTSTR fname);//функция проверяет существует ли файл и доступен ли он для записи
+//структура с основными параметрами программы
 struct ProgrammSettings {
 	void SaveProgrammSettingsInRegistry(unsigned sfSave);//данная функция преназначена для сохранения параметров программы в реестр Windows
 	void LoadProgrammSettingsOfRegistry(unsigned sfLoad);//данная функция предназначена для загрузки параметров программы из реестра Windows
-	enum SETTINGS_TO_SAVE{SIGN_CERTIFICATE_FILE_NAME = 0x00000001, ALG_HASH = 0x00000010};//перечисление, оперделяющее флаги, комбинация которых передаётся вышеописанным функциям, они позволяют задать какие параметры следует (загружать из реестра)/(сохранять в реестре)
+	enum SETTINGS_TO_SAVE{SIGN_CERTIFICATE_FILE_NAME = 0b00000001, ALG_HASH = 0b00000010};//перечисление, оперделяющее флаги, комбинация которых передаётся вышеописанным функциям, они позволяют задать какие параметры следует (загружать из реестра)/(сохранять в реестре)
 	//флаги комбинировать с помощью операции побитового ИЛИ, пример вызова LoadProgrammSettingsOfRegistry с заданными параметрами:
 	//LoadProgrammSettingsOfRegistry(SIGN_CERTIFICATE_FILE_NAME | ALG_HASH) - функция загрузит два параметра из реестра, путь к сертификату и алгоритм хеша
 	//LoadProgrammSettingsOfRegistry(SIGN_CERTIFICATE_FILE_NAME) - функция загрузит только полный путь к сертификату
@@ -28,118 +32,20 @@ struct ProgrammSettings {
 	HANDLE hSignFilesThread = nullptr;//дескриптор этого потока
 	BOOL ConsoleIsAlloced = FALSE;
 	HWND hRootWnd = NULL;
+	bool LoadSettingsFromRegistry = true;
+	bool SaveSettingsInRegistry = true;
 } PP;
-void ProgrammSettings::LoadProgrammSettingsOfRegistry(unsigned sfLoad) {//данная функция предназначена для загрузки параметров программы из реестра Windows
-	BeginOpenKey:
-	HKEY hMainRootKey = NULL;
-	if (RegOpenKeyExW(HKEY_CURRENT_USER, L"Software\\Blbulyan Software\\SignProjectTool", 0, KEY_READ, &hMainRootKey) == ERROR_SUCCESS) {
-		//Блок получения параметра CertificateFile
-		if (CheckBit(sfLoad, 0)) {
-			DWORD ValueType = NULL, ValueSize = 0;
-			WCHARVECTOR CertificateFileFromRegistry;
-			QueryValueCertificateFile:
-			LSTATUS RegQueryValueResult = RegQueryValueExW(hMainRootKey, L"CertificateFile", NULL, &ValueType, (LPBYTE)CertificateFileFromRegistry.data(), &ValueSize);
-			if (RegQueryValueResult == ERROR_MORE_DATA) {
-				CheckCertificateFileDataType:
-				if (ValueType == REG_EXPAND_SZ) {
-					CertificateFileFromRegistry.resize(ValueSize / sizeof(WCHAR));
-					goto QueryValueCertificateFile;
-				}
-				else MessageBoxW(this->hRootWnd, L"Данные в реестре по пути HKEY_CURRENT_USER\\Software\\Blbulyan Software\\SignProjectTool повреждены. Параметр CertificateFile имеет неверный тип.", L"Неверный тип параметра в реестре", MB_OK | MB_ICONERROR);
-				int ResultQuestion = MessageBoxW(this->hRootWnd, L"Восстановить повреждённый параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
-				switch (ResultQuestion) {
-				case IDYES:
-					SaveProgrammSettingsInRegistry(SIGN_CERTIFICATE_FILE_NAME);
-					goto CheckCertificateFileDataType;
-					break;
-				case IDNO:
-				case IDCANCEL:
-					break;
-				}
-			}
-			else if (RegQueryValueResult == ERROR_SUCCESS) {
-				this->CertificateFile = CertificateFileFromRegistry.data();
-			}
-		}
-		//Блок получения параметра AlgHash
-		if (CheckBit(sfLoad, 1)) {
-			QueryValueAlgHash:
-			DWORD AlgHash = NULL;
-			DWORD ValueType = NULL, ValueSize = sizeof(DWORD);
-			LSTATUS RegQueryValueResult = RegQueryValueExW(hMainRootKey, L"AlgHash", NULL, &ValueType, (LPBYTE)&AlgHash, &ValueSize);
-			if (RegQueryValueResult == ERROR_SUCCESS) {
-				CheckAlgHashDataType:
-				if (ValueType == REG_DWORD) {
-					this->HashAlgorithmId = AlgHash;
-					goto QueryValueAlgHash;
-				}
-				else MessageBoxW(this->hRootWnd, L"Данные в реестре по пути HKEY_CURRENT_USER\\Software\\Blbulyan Software\\SignProjectTool повреждены. Параметр AlgHash имеет неверный тип.", L"Неверный тип параметра в реестре", MB_OK | MB_ICONERROR);
-				int ResultQuestion = MessageBoxW(this->hRootWnd, L"Восстановить повреждённый параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
-				switch (ResultQuestion) {
-					case IDYES:
-						SaveProgrammSettingsInRegistry(ALG_HASH);
-						goto CheckAlgHashDataType;
-						break;
-					case IDNO:
-					case IDCANCEL:
-						break;
-				}
-			}
-		}
-	}
-	else {
-		MessageError(L"Ошибка открытия ключа реестра HKEY_CURRENT_USER\\Software\\Blbulyan Software\\SignProjectTool.", L"Ошибка открытия ключа", this->hRootWnd);
-		int ResultQuestion = MessageBoxW(this->hRootWnd, L"Создать данный ключ?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
-		switch (ResultQuestion) {
-		case IDYES:
-			SaveProgrammSettingsInRegistry(SIGN_CERTIFICATE_FILE_NAME | ALG_HASH);
-			goto BeginOpenKey;
-			break;
-		case IDNO:
-		case IDCANCEL:
-			break;
-		}
-	}
-}
-//Данная функция сохраняет параметры программы в реестр, на вход она принимает комбинацию битовых флагов 
-void ProgrammSettings::SaveProgrammSettingsInRegistry(unsigned sfSave) {//данная функция преназначена для сохранения параметров программы в реестр Windows
-	HKEY hMainRootKey = NULL;
-	DWORD dwDisposition = NULL, dwNull = 0;
-	WCHAR TransactionDes[] = L"Транзакция для работы с ключом SignProjectTool";
-	HANDLE hTransaction = CreateTransaction(NULL, 0, TRANSACTION_DO_NOT_PROMOTE, (DWORD)& dwNull, (DWORD)& dwNull, INFINITE, TransactionDes);
-	if (hTransaction != INVALID_HANDLE_VALUE) {
-		if (RegCreateKeyTransactedW(HKEY_CURRENT_USER, L"Software\\Blbulyan Software\\SignProjectTool", 0, NULL, REG_OPTION_VOLATILE, KEY_WRITE, NULL, &hMainRootKey, &dwDisposition, hTransaction, NULL) == ERROR_SUCCESS) {
-			switch (dwDisposition) {
-			case REG_CREATED_NEW_KEY:
-			case REG_OPENED_EXISTING_KEY:
-				if (sfSave != NULL) {
-					if (CheckBit(sfSave, 0)) {
-						if (!(RegSetValueExW(hMainRootKey, L"CertificateFile", 0, REG_EXPAND_SZ, (BYTE*)this->CertificateFile.c_str(), (this->CertificateFile.size() + 1) * sizeof(WCHAR)) == ERROR_SUCCESS))MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\Software\\Blbulyan Software\\SignProjectTool", L"Ошибка создания параметра!", this->hRootWnd);
-					}
-					if (CheckBit(sfSave, 1)) {
-						if (!(RegSetValueExW(hMainRootKey, L"AlgHash", 0, REG_DWORD, (BYTE*)& HashAlgorithmId, sizeof(HashAlgorithmId)) == ERROR_SUCCESS))MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\Software\\Blbulyan Software\\SignProjectTool", L"Ошибка создания параметра!", this->hRootWnd);
-					}
-				}
-				else {
-					if (!(RegSetValueExW(hMainRootKey, L"CertificateFile", 0, REG_EXPAND_SZ, (BYTE*)this->CertificateFile.c_str(), (this->CertificateFile.size() + 1) * sizeof(WCHAR)) == ERROR_SUCCESS))MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\Software\\Blbulyan Software\\SignProjectTool", L"Ошибка создания параметра!", this->hRootWnd);
-					if (!(RegSetValueExW(hMainRootKey, L"AlgHash", 0, REG_DWORD, (BYTE*)& HashAlgorithmId, sizeof(HashAlgorithmId)) == ERROR_SUCCESS))MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\Software\\Blbulyan Software\\SignProjectTool", L"Ошибка создания параметра!", this->hRootWnd);
-				}
-				CommitTransaction(hTransaction);
-				CloseHandle(hTransaction);
-			}
-		}
-		else {
-			MessageError(L"Не удалось создать/открыть ключ реестра по пути HKEY_CURRENT_USER\\Software\\Blbulyan Software\\SignProjectTool", L"Ошибка создания/открытия ключа", this->hRootWnd);
-			CloseHandle(hTransaction);
-		}
-	}
-	else MessageError(L"Не удалось создать транзакцию для создания основной ветки реестра программы", L"Ошибка создания транзакции!", this->hRootWnd);
-}
+//список допустимых аргументов командной строки
 const WSTRINGARRAY ProgrammSettings::CommandLineValidArguments = {
-		L"--about",
-		L"--startup-config",
-		L"--input-files",
-		L"no-graphics"
+		L"--about",L"/a",//вызов диалога о программе
+		L"--startup-config",L"/sc",//вызов диалога начальной конфигурации программы
+		L"--input-files",L"/i",// указать входные для подписи файлы
+		L"--no-graphics",L"/ng",//отключить графический интерфейс
+		L"--not-load-settings-from-registry",L"/nlsfr",L"/nls",//не загружать настройки из реестра Windows
+		L"--not-save-settings-in-registry",L"/nssir",L"/nss",//не сохранять настройки в реестр Windows
+		L"--not-use-registry",L"/nur",//не использовать реестр Windows, данный аргумент делает тоже что и аргументы, в предыдущих двух строках
+		L"--certificate-file",L"/c",L"/cf",//путь к файлу сертификата, для подписи
+		L"--alghash",L"/ah"//алгоритм хеширования, для подписи
 };
 struct LoadCertificateResult {//данную структуру возвращает функция LoadCertificate
 	bool CertificateIsLoaded = false;//сертификат был загружен
@@ -176,8 +82,16 @@ struct PARAMETERS_FOR_THREAD_SIGN_FILES {
 	PCCERT_CONTEXT SignCertificate = nullptr;//сертификат для подписи
 	HCERTSTORE hCertStore = nullptr;//хранилище сертификатов, в котором хранится сертификат SignCertificate
 	SignerSignType pfSignerSign = nullptr;// указатель на функциюю SignerSign
+	typedef PARAMETERS_FOR_THREAD_SIGN_FILES* PPARAMETERS_FOR_THREAD_SIGN_FILES;
 };
-typedef PARAMETERS_FOR_THREAD_SIGN_FILES *PPARAMETERS_FOR_THREAD_SIGN_FILES;
+//данную структуру "возвращает" диалог стартовой конфигурации
+struct START_CONFIGURATION_RESULT {
+	WSTRING CertificateFileName;
+	ALG_ID HashAlgoritmId = NULL;
+	WSTRINGARRAY TimeStampServers;
+	typedef START_CONFIGURATION_RESULT* PSTART_CONFIRURATION_RESULT;
+};
+
 // Отправить объявления функций, включенных в этот модуль кода:
 INT_PTR CALLBACK About(HWND, UINT, WPARAM, LPARAM);
 INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);// процедура обработки сообщений диалога IDD_START_CONFIGURATION
@@ -189,18 +103,13 @@ WSTRINGARRAY OpenFiles(HWND hWnd, COMDLG_FILTERSPEC *cmf, UINT cmfSize, LPCWSTR 
 SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SignerSignType pfSignerSign);//функция предназначена для подписи файла
 LoadCertificateResult LoadCertificate(HWND hWnd, const WSTRING *CertificateHref, bool LoadCertificateFromCertStore, LPCWSTR password);//функция предназначена для загрузки сертификата из файла/хранилища(загрузка из хранилища не реализована)
 bool ThisStringIsProgrammArgument(WSTRING arg);//проверка является ли строка аргументом программы
-bool FileReadebleExists(LPCTSTR fname);//функция проверяет существует ли файл и доступен ли он для записи
 INT StringExistInListBox(HWND hListBox, WSTRING str);//существует ли строка в ListBox
 DWORD WINAPI SignFilesThreadProc(_In_ LPVOID lpParameter);//поточная процедура, отвечающая за подпись файлов
 void EnableWindowClose(HWND hwnd);//функция включает кнопку закрытия на окне
 void DisableWindowClose(HWND hwnd);//функция отключает кнопку закрытия на окне
 BOOL CALLBACK FindListBoxChildWindowProc(HWND hWnd, LPARAM lParam);//процедура обратного вызова для функции EnumChildWindows, её цель - найти ListBox в дочерних окнах и вернуть на него первый попавшейся дескриптор, в качестве lParam ожидает указаьтель на переменную типа HWND для записи в неё результата, используется с EnumChildWindows
 BOOL WINAPI ConsoleHandler(_In_ DWORD dwCtrlType);
-int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
-                     _In_opt_ HINSTANCE hPrevInstance,
-                     _In_ LPWSTR    lpCmdLine,
-                     _In_ int       nCmdShow)
-{
+int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance, _In_ LPWSTR lpCmdLine, _In_ int nCmdShow){
     UNREFERENCED_PARAMETER(hPrevInstance);
 	UNREFERENCED_PARAMETER(lpCmdLine);
 	UNREFERENCED_PARAMETER(nCmdShow);
@@ -221,6 +130,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 			//показ диалога с настройками и премениение измениений
 
 		}
+		else if (CommandArray[i] == L"--not-load-settings-from-registry" || CommandArray[i] == L"/nlsfr" || CommandArray[i] == L"/nls") {
+			PP.LoadSettingsFromRegistry = false;
+		}
+		else if (CommandArray[i] == L"--not-save-settings-in-registry" || CommandArray[i] == L"/nssir" || CommandArray[i] == L"/nss") {
+			PP.SaveSettingsInRegistry = false;
+		}
+		else if (CommandArray[i] == L"--not-use-registry" || CommandArray[i] ==  L"/nur") {
+			PP.SaveSettingsInRegistry = false;
+			PP.LoadSettingsFromRegistry = false;
+		}
 		else if (CommandArray[i] == L"--input-files" || CommandArray[i] == L"/i") {
 			//входные файла для подписи
 			if (i != (CommandArraySize - 1)) {
@@ -239,7 +158,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 				return -1;
 			}
 		}
-		else if (CommandArray[i] == L"--certificate-file" || CommandArray[i] == L"/c") {
+		else if (CommandArray[i] == L"--certificate-file" || CommandArray[i] == L"/c" || CommandArray[i] == L"/cf") {
 			//получение пути к файлу сертификата для подписи
 			if (i != (CommandArraySize - 1)) {
 				WSTRING CertificateFile = CommandArray[i + 1];
@@ -268,7 +187,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 		else if (CommandArray[i] == L"--alghash" || CommandArray[i] == L"/ah") {
 			//получения алгоритма хеширования для цифровой подписи
 		}
-		else if (CommandArray[i] == L"no-graphics") {
+		else if (CommandArray[i] == L"--no-graphics" || CommandArray[i] == L"/ng") {
 			NoGraphicsMode = true;
 		}
 		else {
@@ -278,7 +197,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 			return -1;
 		}
 	}
-	PP.LoadProgrammSettingsOfRegistry(sfLoadParametersFromRegistry);//загрузка требуемых параметров из реестра перед дальнейшей работой
+	if(PP.LoadSettingsFromRegistry)PP.LoadProgrammSettingsOfRegistry(sfLoadParametersFromRegistry);//загрузка требуемых параметров из реестра перед дальнейшей работой
 	HACCEL hAccel = LoadAcceleratorsW(PP.hInst, MAKEINTRESOURCEW(IDC_SIGNPROJECTTOOL));
 	MSG msg = { 0 };
 	if (hAccel) {
@@ -306,7 +225,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 	}
 	PP.hRootWnd = NULL;
 	//if (PP.CertificateFile != L"")PP.SaveProgrammSettingsInRegistry(ProgrammSettings::SETTINGS_TO_SAVE::SIGN_CERTIFICATE_FILE_NAME | ProgrammSettings::SETTINGS_TO_SAVE::ALG_HASH);
-	PP.SaveProgrammSettingsInRegistry(ProgrammSettings::SETTINGS_TO_SAVE::ALG_HASH);
+	if(PP.SaveSettingsInRegistry)PP.SaveProgrammSettingsInRegistry(ProgrammSettings::SETTINGS_TO_SAVE::ALG_HASH);
 	return msg.wParam;
 }
 
@@ -337,11 +256,14 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
 }
 INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
 	HWND hOpenFromCertStore = GetDlgItem(hDlg, IDC_BUTTON_SELECT_CERTIFICATE_FROM_STORE), hOpenFile = GetDlgItem(hDlg, IDC_OPEN_FILE), hCertFile = GetDlgItem(hDlg, IDC_CERT_FILE), hCertStore = GetDlgItem(hDlg, IDC_CERT_STORE), hCertList = GetDlgItem(hDlg, IDC_COMBOX_LISTCERT_FILES);
-	static WSTRING CertificateFileName;
+	//static WSTRING CertificateFileName;
 	static UINT MaxHScrollWidth = NULL;
+	static START_CONFIGURATION_RESULT LSCR;
+	static START_CONFIGURATION_RESULT::PSTART_CONFIRURATION_RESULT PSCR = NULL;
 	switch(message){
 		case WM_INITDIALOG:{
-			CertificateFileName = PP.CertificateFile;
+			PSCR = (START_CONFIGURATION_RESULT::PSTART_CONFIRURATION_RESULT)lParam;
+			//CertificateFileName = PP.CertificateFile;
 			HICON hDialogIcon = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
 			if (hDialogIcon == NULL)MessageError(L"Не удалось загрузить иконку для текущего диалога!", L"Ошибка загрузки иконки!", hDlg);
 			else {
@@ -375,14 +297,10 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 				case IDM_EXIT:
 					EndDialog(hDlg, IDM_EXIT);
 					break;
-				case IDOK: {
-					
-					PP.CertificateFile = CertificateFileName;
-					EndDialog(hDlg, IDOK);
-					return (INT_PTR)TRUE; 
-				}
+				case IDOK:
+					*PSCR = LSCR;
 				case IDCANCEL:
-					EndDialog(hDlg, IDCANCEL);
+					EndDialog(hDlg, LOWORD(wParam));
 					return (INT_PTR)TRUE;
 				case IDC_CERT_STORE:
 					if (IsDlgButtonChecked(hDlg, IDC_CERT_STORE) == BST_CHECKED) {
@@ -410,7 +328,7 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 					}
 					break; 
 				}
-				case IDC_OPEN_FILE:{
+				case IDC_OPEN_CERT_FILE:{
 					COMDLG_FILTERSPEC cmf[1] = {//массив с фильтрами
 						//фильтр для *.pfx файлов
 						{
@@ -438,13 +356,12 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 								
 							 }
 						}
-						CertificateFileName = CertificateFile[0];
+						LSCR.CertificateFileName = CertificateFile[0];
 					}
 					break;
 				}
 				case IDC_BUTTON_SETTINGSTIMESTAMP: {
-					WSTRINGARRAY TimeStampServers;
-					DialogBoxParamW(PP.hInst, MAKEINTRESOURCEW(IDD_SETTINGS_TIMESTAMP_SERVERS), hDlg, SettingsTimeStampsServersDlgProc, (LPARAM)& TimeStampServers);
+					DialogBoxParamW(PP.hInst, MAKEINTRESOURCEW(IDD_SETTINGS_TIMESTAMP_SERVERS), hDlg, SettingsTimeStampsServersDlgProc, (LPARAM)&LSCR.TimeStampServers);
 					break;
 				}
 				
@@ -1091,6 +1008,7 @@ SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SignerSignType pf
 	SIGNER_CERT_STORE_INFO signerCertStoreInfo;
 	SIGNER_CERT signerCert;
 	SIGNER_SIGNATURE_INFO signerSignatureInfo;
+	//SIGNER_PROVIDER_INFO signerProviderInfo;
 	if (pfSignerSign) {
 		DWORD dwIndex = 0;
 		signerFileInfo.cbSize = sizeof(SIGNER_FILE_INFO);
@@ -1118,11 +1036,13 @@ SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SignerSignType pf
 		signerSignatureInfo.psUnauthenticated = NULL;
 		signerSignatureInfo.dwAttrChoice = NULL; // SIGNER_NO_ATTR
 		signerSignatureInfo.pAttrAuthcode = NULL;
+		/*signerProviderInfo.cbSize = sizeof(SIGNER_PROVIDER_INFO);
+		signerProviderInfo.dwProviderType = PROV_RSA_AES;
+		signerProviderInfo.pwszProviderName = MS_ENH_RSA_AES_PROV;
+		signerProviderInfo.dwPvkChoice = 0x1;
+		signerProviderInfo.pwszPvkFileName = (LPWSTR)L"C:\\Users\\blbul\\OneDrive\\Документы\\Сертификаты\\CyberForum.pvk";*/
 		HRESULT hSignerSignResult = pfSignerSign(&signerSubjectInfo, &signerCert, &signerSignatureInfo, NULL, NULL, NULL, NULL);
-		if (SUCCEEDED(hSignerSignResult)) {
-			//SI->pfSignerFreeSignerContext(pSignerContext);
-			result.FileIsSigned = true;
-		}
+		if (SUCCEEDED(hSignerSignResult))result.FileIsSigned = true;
 		else {
 			//в случае если неудалось подписать файл
 			WSTRING ErrorText = L"Не удалось подписать файл \"";
@@ -1207,7 +1127,7 @@ void EnableWindowClose(HWND hwnd){
 }
 //поточная процедура, отвечающая за подпись файлов
 DWORD WINAPI SignFilesThreadProc(_In_ LPVOID lpParameter) {
-	PPARAMETERS_FOR_THREAD_SIGN_FILES PFSF = (PPARAMETERS_FOR_THREAD_SIGN_FILES)lpParameter;
+	PARAMETERS_FOR_THREAD_SIGN_FILES::PPARAMETERS_FOR_THREAD_SIGN_FILES PFSF = (PARAMETERS_FOR_THREAD_SIGN_FILES::PPARAMETERS_FOR_THREAD_SIGN_FILES)lpParameter;
 	HWND hListSelectedFilesForCertification = GetDlgItem(PFSF->hDlg, IDC_LIST_SELECTED_FILES_FOR_CERTIFICTION), hDeleteFile = GetDlgItem(PFSF->hDlg, IDC_DELETE_FILE), hModifyFile = GetDlgItem(PFSF->hDlg, IDC_MODIFY_FILE), hSign = GetDlgItem(PFSF->hDlg, IDC_SIGN), hClear = GetDlgItem(PFSF->hDlg, IDC_CLEAR), hQuitCancel = GetDlgItem(PFSF->hDlg, IDCANCEL), hProgressForSigningFiles = GetDlgItem(PFSF->hDlg, IDC_PROGRESS_SIGNING_FILES), hAddFiles = GetDlgItem(PFSF->hDlg, IDC_ADD_FILE), hPauseSigning = GetDlgItem(PFSF->hDlg, IDC_PAUSE_SIGNING);
 	SIGN_FILE_RESULT::SIGNING_FILE SF;
 	BOOL AnErrorHasOccurred = FALSE;
@@ -1384,4 +1304,145 @@ bool FileReadebleExists(LPCTSTR fname)
 		return true;
 	}
 	return false;
+}
+void ProgrammSettings::LoadProgrammSettingsOfRegistry(unsigned sfLoad) {//данная функция предназначена для загрузки параметров программы из реестра Windows
+	HKEY hMainRootKey = NULL;
+	LSTATUS RegOpenKeyResult = RegOpenKeyExW(HKEY_CURRENT_USER, ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, 0, KEY_READ, &hMainRootKey);
+	if (RegOpenKeyResult == ERROR_SUCCESS) {
+		//Блок получения параметра CertificateFile
+		if (CheckBit(sfLoad, 0)) {
+			DWORD ValueType = NULL, ValueSize = 1;
+			WCHARVECTOR CertificateFileFromRegistry;
+			CertificateFileFromRegistry.resize(1);
+		QueryValueCertificateFile:
+			LSTATUS RegQueryValueResult = RegQueryValueExW(hMainRootKey, L"CertificateFile", NULL, &ValueType, (LPBYTE)CertificateFileFromRegistry.data(), &ValueSize);
+			if (RegQueryValueResult == ERROR_MORE_DATA) {
+				if (ValueType == REG_EXPAND_SZ) {
+					CertificateFileFromRegistry.resize(ValueSize / sizeof(WCHAR));
+					goto QueryValueCertificateFile;
+				}
+				else {
+					MessageBoxW(this->hRootWnd, L"Данные в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL " повреждены. Параметр CertificateFile имеет неверный тип.", L"Неверный тип параметра в реестре", MB_OK | MB_ICONERROR);
+					int ResultQuestion = MessageBoxW(this->hRootWnd, L"Восстановить повреждённый параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
+					switch (ResultQuestion) {
+					case IDYES:
+						SaveProgrammSettingsInRegistry(SIGN_CERTIFICATE_FILE_NAME);
+						break;
+					case IDNO:
+					case IDCANCEL:
+						break;
+					}
+				}
+
+			}
+			else if (RegQueryValueResult == ERROR_FILE_NOT_FOUND) {
+				MessageBoxW(this->hRootWnd, L"Ошибка получения значения параметра CertificateFile по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL ". Такого параметра не сущевтует.", L"Ошибка получения значения", MB_OK | MB_ICONERROR);
+				int ResultQuestion = MessageBoxW(this->hRootWnd, L"Создать отсуствующий параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
+				switch (ResultQuestion) {
+				case IDYES:
+					SaveProgrammSettingsInRegistry(SIGN_CERTIFICATE_FILE_NAME);
+					break;
+				case IDNO:
+				case IDCANCEL:
+					break;
+				}
+			}
+			else if (RegQueryValueResult == ERROR_SUCCESS) {
+				if (CertificateFileFromRegistry.size() > 1) {
+					if (FileReadebleExists(CertificateFileFromRegistry.data()))this->CertificateFile = CertificateFileFromRegistry.data();
+					else {
+						WSTRING FileHref = CertificateFileFromRegistry.data();
+						WSTRING ErrorText = L"Не удалось открыть файл сертификата по пути \"" + FileHref + "\" используя параметр CertificateFile по пути в реестре \"HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL "\" в качестве пути к файлу. Вам придётся выбрать сертификат в ручную.";
+						MessageBoxW(this->hRootWnd, ErrorText.c_str(), L"Ошибка открытия файла!", MB_OK | MB_ICONERROR);
+					}
+				}
+			}
+			else MessageError(L"Ошибка получения значения параметра CertificateFile из реестра по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL ".", L"Ошибка получения параметра!", this->hRootWnd, RegQueryValueResult);
+		}
+		//Блок получения параметра AlgHash
+		if (CheckBit(sfLoad, 1)) {
+			DWORD AlgHash = NULL;
+			DWORD ValueType = NULL, ValueSize = sizeof(DWORD);
+			LSTATUS RegQueryValueResult = RegQueryValueExW(hMainRootKey, L"AlgHash", NULL, &ValueType, (LPBYTE)& AlgHash, &ValueSize);
+			if (RegQueryValueResult == ERROR_SUCCESS) {
+				if (ValueType == REG_DWORD)this->HashAlgorithmId = AlgHash;
+				else {
+					MessageBoxW(this->hRootWnd, L"Данные в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL " повреждены. Параметр AlgHash имеет неверный тип.", L"Неверный тип параметра в реестре", MB_OK | MB_ICONERROR);
+					int ResultQuestion = MessageBoxW(this->hRootWnd, L"Восстановить повреждённый параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
+					switch (ResultQuestion) {
+					case IDYES:
+						SaveProgrammSettingsInRegistry(ALG_HASH);
+						break;
+					case IDNO:
+					case IDCANCEL:
+						break;
+					}
+				}
+			}
+			else if (RegQueryValueResult == ERROR_FILE_NOT_FOUND) {
+				MessageBoxW(this->hRootWnd, L"Ошибка получения значения параметра AlgHash из реестра по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL " . Такого параметра не сущевтует.", L"Ошибка получения значения", MB_OK | MB_ICONERROR);
+				int ResultQuestion = MessageBoxW(this->hRootWnd, L"Создать отсуствующий параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
+				switch (ResultQuestion) {
+				case IDYES:
+					SaveProgrammSettingsInRegistry(ALG_HASH);
+					break;
+				case IDNO:
+				case IDCANCEL:
+					break;
+				}
+			}
+			else MessageError(L"Ошибка получения значения параметра AlgHash из реестра по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL ".", L"Ошибка получения параметра!", this->hRootWnd, RegQueryValueResult);
+		}
+	}
+	else {
+		MessageError(L"Ошибка открытия ключа реестра HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL ".", L"Ошибка открытия ключа", this->hRootWnd, RegOpenKeyResult);
+		int ResultQuestion = MessageBoxW(this->hRootWnd, L"Создать данный ключ?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
+		switch (ResultQuestion) {
+		case IDYES:
+			SaveProgrammSettingsInRegistry(SIGN_CERTIFICATE_FILE_NAME | ALG_HASH);
+			break;
+		case IDNO:
+		case IDCANCEL:
+			break;
+		}
+	}
+}
+//Данная функция сохраняет параметры программы в реестр, на вход она принимает комбинацию битовых флагов 
+void ProgrammSettings::SaveProgrammSettingsInRegistry(unsigned sfSave) {//данная функция преназначена для сохранения параметров программы в реестр Windows
+	HKEY hMainRootKey = NULL;
+	DWORD dwDisposition = NULL, dwNull = 0;
+	WCHAR TransactionDes[] = L"Транзакция для работы с ключом SignProjectTool";
+	HANDLE hTransaction = CreateTransaction(NULL, 0, TRANSACTION_DO_NOT_PROMOTE, (DWORD)& dwNull, (DWORD)& dwNull, INFINITE, TransactionDes);
+	if (hTransaction != INVALID_HANDLE_VALUE) {
+		LSTATUS RegCreateKeyTransactedResult = RegCreateKeyTransactedW(HKEY_CURRENT_USER, ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, 0, NULL, REG_OPTION_VOLATILE, KEY_WRITE, NULL, &hMainRootKey, &dwDisposition, hTransaction, NULL);
+		if (RegCreateKeyTransactedResult == ERROR_SUCCESS) {
+			switch (dwDisposition) {
+			case REG_CREATED_NEW_KEY:
+			case REG_OPENED_EXISTING_KEY:
+				if (sfSave != NULL) {
+					if (CheckBit(sfSave, 0)) {
+						LSTATUS RegSetValueExResult = RegSetValueExW(hMainRootKey, L"CertificateFile", 0, REG_EXPAND_SZ, (BYTE*)this->CertificateFile.c_str(), (this->CertificateFile.size() + 1) * sizeof(WCHAR));
+						if (RegSetValueExResult != ERROR_SUCCESS)MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания параметра!", this->hRootWnd, RegSetValueExResult);
+					}
+					if (CheckBit(sfSave, 1)) {
+						LSTATUS RegSetValueExResult = RegSetValueExW(hMainRootKey, L"AlgHash", 0, REG_DWORD, (BYTE*)& HashAlgorithmId, sizeof(HashAlgorithmId));
+						if (RegSetValueExResult != ERROR_SUCCESS)MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания параметра!", this->hRootWnd, RegSetValueExResult);
+					}
+				}
+				else {
+					LSTATUS RegSetValueExResult = RegSetValueExW(hMainRootKey, L"CertificateFile", 0, REG_EXPAND_SZ, (BYTE*)this->CertificateFile.c_str(), (this->CertificateFile.size() + 1) * sizeof(WCHAR));
+					if (RegSetValueExResult != ERROR_SUCCESS)MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания параметра!", this->hRootWnd, RegSetValueExResult);
+					RegSetValueExResult = RegSetValueExW(hMainRootKey, L"AlgHash", 0, REG_DWORD, (BYTE*)& HashAlgorithmId, sizeof(HashAlgorithmId));
+					if (RegSetValueExResult != ERROR_SUCCESS)MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания параметра!", this->hRootWnd, RegSetValueExResult);
+				}
+				CommitTransaction(hTransaction);
+				CloseHandle(hTransaction);
+			}
+		}
+		else {
+			MessageError(L"Не удалось создать/открыть ключ реестра по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания/открытия ключа", this->hRootWnd, RegCreateKeyTransactedResult);
+			CloseHandle(hTransaction);
+		}
+	}
+	else MessageError(L"Не удалось создать транзакцию для создания основной ветки реестра программы", L"Ошибка создания транзакции!", this->hRootWnd);
 }
