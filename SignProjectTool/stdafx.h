@@ -13,13 +13,15 @@
 #include <ShObjIdl.h>
 #include <wincrypt.h>
 #include <cryptuiapi.h>
+#include <shellapi.h>
 //#include <Uxtheme.h>
 #include <ktmw32.h>
 // Файлы заголовков среды выполнения C
 #include <stdlib.h>
 #include <malloc.h>
 #include <memory.h>
-#include <iostream>
+#include <bitset>
+//#include <iostream>
 //Файлы заголовков проектных DLL
 #include "../WWS/WWS.h"
 #define BDL_ENABLE_PROTOTYPES

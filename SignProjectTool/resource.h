@@ -13,9 +13,13 @@
 #define IDI_SMALL                       108
 #define IDC_SIGNPROJECTTOOL             109
 #define ID_TOOLBAR_CONTROL_FOR_ADD_FILES_FOR_CERTIFICATION 111
+#define IDM_SHOW_FILE_IN_EXPLORER       112
+#define IDM_CLEAR_SELECT_IN_LIST        113
+#define IDM_SELECT_ALL_IN_LIST          114
 #define IDR_MAINFRAME                   128
 #define IDD_START_CONFIGURATION         129
 #define IDD_ADD_FILES_FOR_CERTIFICATION 130
+#define IDD_SETTINGS_FOR_ACTIONS_PERFORMED_AFTER_SIGNING 132
 #define IDC_CERT_STORE                  1000
 #define IDC_CERT_FILE                   1001
 #define IDC_CERT_STORE_NAME             1002
@@ -46,6 +50,12 @@
 #define IDC_BUTTON1                     1027
 #define IDC_PAUSE_SIGNING               1027
 #define IDC_ITEMS_COUNT                 1028
+#define IDC_RADIO_DELETE_NO_SIGNING_FILES_FROM_LIST 1031
+#define IDC_RADIO_DELETE_ALL_FILES_FROM_LIST 1032
+#define IDC_RADIO_DELETE_SIGNING_FILES_FROM_LIST 1033
+#define IDC_RADIO_NO_MODIFY_FILES_LIST  1034
+#define IDC_CHECK1                      1035
+#define IDC_CHECK_PERFORM_ACTIONS_AFTER_SIGNING 1035
 #define ID_32771                        32771
 #define IDM_STARTUPCONFIG               32772
 #define ID_CLOSE_CONSOLE                32773
@@ -56,9 +66,9 @@
 #ifdef APSTUDIO_INVOKED
 #ifndef APSTUDIO_READONLY_SYMBOLS
 #define _APS_NO_MFC                     1
-#define _APS_NEXT_RESOURCE_VALUE        132
-#define _APS_NEXT_COMMAND_VALUE         32775
-#define _APS_NEXT_CONTROL_VALUE         1029
-#define _APS_NEXT_SYMED_VALUE           112
+#define _APS_NEXT_RESOURCE_VALUE        134
+#define _APS_NEXT_COMMAND_VALUE         32779
+#define _APS_NEXT_CONTROL_VALUE         1036
+#define _APS_NEXT_SYMED_VALUE           115
 #endif
 #endif

@@ -21,20 +21,39 @@ struct ProgrammSettings {
 	//LoadProgrammSettingsOfRegistry(ALG_HASH) - функция загрузит только алгоритм хеширования
 	//соотвственно флаг SIGN_CERTIFICATE_FILE_NAME - предназначен для загрузки полного пути к сертификату для подписи из реестра Windows,
 	//а флаг ALG_HASH - предназначен для загрузки алгоритма хеширования из реестра Windows
-	HINSTANCE hInst = NULL;//экземпляр приложения
+	enum COMMAND_AFTER_SIGNING_FILES {
+		CASF_DELETE_SUCCESSFULLY_SIGNED_FILES_FROM_LIST = 0b00000001,
+		CASF_DELETE_NOT_SUCCESSFULLY_SIGNED_FILES_FROM_LIST = 0b00000010,
+		CASF_DELETE_ALL_FILES_FROM_LIST = 0b00000011
+	};
+	/*
+		Команды, которые могут быть выполнены над списком:
+			0bxxxxxx00 - ничего не удалять из списка
+			0bxxxxxxx1 - удалить успешно подписанные файлы из списка
+			0b00000010 - удалить недаучноподписанные файлы из списка
+			0bxxxxxx11 - удалить все файлы из списка
+
+	*/
 	WSTRINGARRAY FilesForCertification;//список файлов для подписи
 	WSTRING CertificateFile;// имя файла сертификата для подписи им
-	WSTRINGARRAY HttpTimeStampServers;
+	WSTRINGARRAY HttpTimeStampServers;//список TimeStamp серверов
 	static const WSTRINGARRAY CommandLineValidArguments;//массив с допустимыми аргументами командной строки
 	bool CertificateInCertStore = false;//хранится ли сертификат, которым будут подписываться файлы в хранилище сертификатов (задаётся при начальной настройке программы
-	ALG_ID HashAlgorithmId = CALG_SHA1;//алгоритм хеширования при подписи поумолчанию
-	WNDPROC DefaultConsoleWindowProc = NULL;
-	HANDLE hSignFilesThread = nullptr;//дескриптор этого потока
-	BOOL ConsoleIsAlloced = FALSE;
-	HWND hRootWnd = NULL;
-	bool LoadSettingsFromRegistry = true;
-	bool SaveSettingsInRegistry = true;
+	ALG_ID HashAlgorithmId = CALG_SHA_256;//алгоритм хеширования при подписи поумолчанию
+	bool LoadSettingsFromRegistry = true;//загружать настройки из реестра Windows
+	bool SaveSettingsInRegistry = true;//сохранять настройки в реестр Windows
+	byte CommandToExecuteAfterSigningFiles = 0b00000000;//команда для исполнения после подписи файлов
+	
+
 } PP;
+//структура описывающая элементы рантайма, состояние программы в рантайме, данные в ней могут менятся в зависимости от запуска к запуску
+struct ProgrammStatement {
+	HINSTANCE hInst = NULL;//экземпляр приложения
+	WNDPROC DefaultConsoleWindowProc = NULL;//процедура консоли по умолчанию(возможно не используется)
+	HANDLE hSignFilesThread = nullptr;//дескриптор этого потока
+	BOOL ConsoleIsAlloced = FALSE;//выделена ли консоль
+	HWND hRootWnd = NULL;//дескриптор главного окна
+} PS;
 //список допустимых аргументов командной строки
 const WSTRINGARRAY ProgrammSettings::CommandLineValidArguments = {
 		L"--about",L"/a",//вызов диалога о программе
@@ -82,6 +101,7 @@ struct PARAMETERS_FOR_THREAD_SIGN_FILES {
 	PCCERT_CONTEXT SignCertificate = nullptr;//сертификат для подписи
 	HCERTSTORE hCertStore = nullptr;//хранилище сертификатов, в котором хранится сертификат SignCertificate
 	SignerSignType pfSignerSign = nullptr;// указатель на функциюю SignerSign
+	byte CommandToExecuteAfterSigningFiles = 0b00000000;//команда для исполнения после подписи файлов(детали описаны в комментарии в структуре с основными параметрами программы)
 	typedef PARAMETERS_FOR_THREAD_SIGN_FILES* PPARAMETERS_FOR_THREAD_SIGN_FILES;
 };
 //данную структуру "возвращает" диалог стартовой конфигурации
@@ -98,6 +118,7 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);// процедура обработки сообщений диалога IDD_ADD_FILES_FOR_CERTIFICATION
 INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);//процедура обработки сообщений диалога IDD_SETTINGS_TIMESTAMP_SERVERS
 //INT_PTR CALLBACK MainConsoleWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam);
+INT_PTR CALLBACK SettingsForActionsPerformedAfterSigningDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam);
 UINT CalcBItemWidth(HWND hWnd, LPCTSTR Text);//функция считает размер строки в пикселях, вызывается перед добавлением строки в ListBox, затем данный размер использует в качестве значения горизонтальной прокрутки
 WSTRINGARRAY OpenFiles(HWND hWnd, COMDLG_FILTERSPEC *cmf, UINT cmfSize, LPCWSTR TitleFileDialog, LPCWSTR OKButtonTitle, bool Multiselect);//функция предназначена для показа диалогового окна выбора файлов/файла, возвращает массив строк с полными путями к файлам/возвраает массив строк, содержащий один путь к выбранному файлу, соответсвенно
 SIGN_FILE_RESULT SignFile(SIGN_FILE_RESULT::PCSIGNING_FILE SF, SignerSignType pfSignerSign);//функция предназначена для подписи файла
@@ -117,13 +138,13 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 	//какие параметры из реестра следует загрузить, по умолчанию загружаются все парметры, однако, если указан аргумент командной строки, 
 	//который задаёт соотвествующий параметр, то предпочитается он, те параметры которые взяты из командной строки исключаеются отсюда посредство исключающего или 
 	/*Обработка аргументов командной строки*/
-	PP.hInst = hInstance;
+	PS.hInst = hInstance;
 	bool NoGraphicsMode = false;
 	WSTRINGARRAY CommandArray = BreakAStringIntoAnArrayOfStringsByCharacter(lpCmdLine, L' ');
 	size_t CommandArraySize = CommandArray.size();
 	for (size_t i = 0; i < CommandArraySize; i++) {
 		if (CommandArray[i] == L"--about" || CommandArray[i] == L"/a") {
-			DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_ABOUTBOX), NULL, About);
+			DialogBoxW(PS.hInst, MAKEINTRESOURCEW(IDD_ABOUTBOX), NULL, About);
 			return NULL;
 		}
 		else if (CommandArray[i] == L"--startup-config" || CommandArray[i] == L"/sc") {
@@ -198,16 +219,16 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 		}
 	}
 	if(PP.LoadSettingsFromRegistry)PP.LoadProgrammSettingsOfRegistry(sfLoadParametersFromRegistry);//загрузка требуемых параметров из реестра перед дальнейшей работой
-	HACCEL hAccel = LoadAcceleratorsW(PP.hInst, MAKEINTRESOURCEW(IDC_SIGNPROJECTTOOL));
+	HACCEL hAccel = LoadAcceleratorsW(PS.hInst, MAKEINTRESOURCEW(IDC_SIGNPROJECTTOOL));
 	MSG msg = { 0 };
 	if (hAccel) {
-		PP.hRootWnd = CreateDialogW(PP.hInst, MAKEINTRESOURCEW(IDD_ADD_FILES_FOR_CERTIFICATION), NULL, AddFilesForCertificationDlgProc);
-		if (PP.hRootWnd) {
-			ShowWindow(PP.hRootWnd, nCmdShow);
-			UpdateWindow(PP.hRootWnd);
+		PS.hRootWnd = CreateDialogW(PS.hInst, MAKEINTRESOURCEW(IDD_ADD_FILES_FOR_CERTIFICATION), NULL, AddFilesForCertificationDlgProc);
+		if (PS.hRootWnd) {
+			ShowWindow(PS.hRootWnd, nCmdShow);
+			UpdateWindow(PS.hRootWnd);
 			while (GetMessageW(&msg, NULL, 0, 0)) {
-				if (!TranslateAcceleratorW(PP.hRootWnd, hAccel, &msg)) {
-					if (!IsDialogMessageW(PP.hRootWnd, &msg)) {
+				if (!TranslateAcceleratorW(PS.hRootWnd, hAccel, &msg)) {
+					if (!IsDialogMessageW(PS.hRootWnd, &msg)) {
 						TranslateMessage(&msg);
 						DispatchMessageW(&msg);
 					}
@@ -223,7 +244,7 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance, _In_opt_ HINSTANCE hPrevInstance
 		MessageError(L"Не удалось загрузить таблицу асселераторов!", L"Ошибка загрузки таблицы асселераторов!", NULL);
 		return FALSE;
 	}
-	PP.hRootWnd = NULL;
+	PS.hRootWnd = NULL;
 	//if (PP.CertificateFile != L"")PP.SaveProgrammSettingsInRegistry(ProgrammSettings::SETTINGS_TO_SAVE::SIGN_CERTIFICATE_FILE_NAME | ProgrammSettings::SETTINGS_TO_SAVE::ALG_HASH);
 	if(PP.SaveSettingsInRegistry)PP.SaveProgrammSettingsInRegistry(ProgrammSettings::SETTINGS_TO_SAVE::ALG_HASH);
 	return msg.wParam;
@@ -236,7 +257,7 @@ INT_PTR CALLBACK About(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam)
     switch (message)
     {
 		case WM_INITDIALOG:{
-			HICON hDialogIcon = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
+			HICON hDialogIcon = LoadIconW(PS.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
 			if (hDialogIcon == NULL)MessageError(L"Не удалось загрузить иконку для текущего диалога!", L"Ошибка загрузки иконки!", hDlg);
 			else {
 				SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
@@ -264,7 +285,7 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 		case WM_INITDIALOG:{
 			PSCR = (START_CONFIGURATION_RESULT::PSTART_CONFIRURATION_RESULT)lParam;
 			//CertificateFileName = PP.CertificateFile;
-			HICON hDialogIcon = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
+			HICON hDialogIcon = LoadIconW(PS.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
 			if (hDialogIcon == NULL)MessageError(L"Не удалось загрузить иконку для текущего диалога!", L"Ошибка загрузки иконки!", hDlg);
 			else {
 				SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
@@ -292,7 +313,7 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 		case WM_COMMAND:
 			switch (LOWORD(wParam)) {
 				case IDM_ABOUT:
-					DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_ABOUTBOX), hDlg, About);
+					DialogBoxW(PS.hInst, MAKEINTRESOURCEW(IDD_ABOUTBOX), hDlg, About);
 					break;
 				case IDM_EXIT:
 					EndDialog(hDlg, IDM_EXIT);
@@ -361,7 +382,7 @@ INT_PTR CALLBACK StartConfigurationDlgProc(HWND hDlg, UINT message, WPARAM wPara
 					break;
 				}
 				case IDC_BUTTON_SETTINGSTIMESTAMP: {
-					DialogBoxParamW(PP.hInst, MAKEINTRESOURCEW(IDD_SETTINGS_TIMESTAMP_SERVERS), hDlg, SettingsTimeStampsServersDlgProc, (LPARAM)&LSCR.TimeStampServers);
+					DialogBoxParamW(PS.hInst, MAKEINTRESOURCEW(IDD_SETTINGS_TIMESTAMP_SERVERS), hDlg, SettingsTimeStampsServersDlgProc, (LPARAM)&LSCR.TimeStampServers);
 					break;
 				}
 				
@@ -380,9 +401,10 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 	static PARAMETERS_FOR_THREAD_SIGN_FILES TSFINIT;
 	static BOOL ThreadForSigningFilesIsSuspend = FALSE;
 	static HTHEME DefaultThemeForProgressBar = NULL;
+	static bool RemoveSuccessfullySignedFilesFromTheList = false;
 	switch (message) {
 		case WM_INITDIALOG:{
-			HICON hDialogIcon = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));//загрузка иконки диалога из ресурсов
+			HICON hDialogIcon = LoadIconW(PS.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));//загрузка иконки диалога из ресурсов
 			if (hDialogIcon == NULL)MessageError(L"Не удалось загрузить иконку для текущего диалога!", L"Ошибка загрузки иконки!", hDlg);
 			else {
 				//установка иконки диалога
@@ -400,21 +422,57 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 			/*HWND hProgressForSigningFiles = GetDlgItem(hDlg, IDC_PROGRESS_SIGNING_FILES);
 			SetWindowTheme(hProgressForSigningFiles, L"Explorer", L"");
 			SendMessageW(hProgressForSigningFiles, PBM_SETBARCOLOR, 0, RGB(255, 0, 0));*/
-			//hToolBar = CreateToolbarEx(hDlg, NULL, ID_TOOLBAR_CONTROL_FOR_ADD_FILES_FOR_CERTIFICATION, 2, PP.hInst, )
+			//hToolBar = CreateToolbarEx(hDlg, NULL, ID_TOOLBAR_CONTROL_FOR_ADD_FILES_FOR_CERTIFICATION, 2, PS.hInst, )
 			return (INT_PTR)TRUE;
 		}
 		case WM_DESTROY: {
-			if (PP.hSignFilesThread != NULL) {
-				DWORD result = WaitForSingleObject(PP.hSignFilesThread, 0);
+			if (PS.hSignFilesThread != NULL) {
+				DWORD result = WaitForSingleObject(PS.hSignFilesThread, 0);
 				if (result != WAIT_OBJECT_0) {
 					// the thread handle is signaled - the thread has terminated
 					PostThreadMessageW(ThreadSigningFilesId, PARAMETERS_FOR_THREAD_SIGN_FILES::THREAD_MESSAGES::THM_CLOSE, 0, 0);
-					if (ThreadForSigningFilesIsSuspend)ResumeThread(PP.hSignFilesThread);
+					if (ThreadForSigningFilesIsSuspend)ResumeThread(PS.hSignFilesThread);
 				}
-				if (CloseHandle(PP.hSignFilesThread) == NULL)MessageError(L"Не удаллось закрыть дескриптор потока подписи файлов!", L"Ошибка закрытия дескриптора!", hDlg);
+				if (CloseHandle(PS.hSignFilesThread) == NULL)MessageError(L"Не удаллось закрыть дескриптор потока подписи файлов!", L"Ошибка закрытия дескриптора!", hDlg);
 			}
 			PostQuitMessage(LOWORD(wParam));
 			return 0;
+		}
+		//обработка показа контекстного меню
+		case WM_CONTEXTMENU: {
+			//контекстное меню над списком с файлами, требующими цифровую подпись
+			if ((HWND)wParam == hListSelectedFilesForCertification) {
+				if (SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL) > 0) {
+					long x = LOWORD(lParam);
+					long y = HIWORD(lParam);
+					POINT p = { x, y };
+					//ClientToScreen(hDlg, &p); //add this line
+					HMENU hMenu = CreatePopupMenu();
+					int pos = LBItemFromPt(hListSelectedFilesForCertification, p, 0);
+					if (pos != -1)SendMessageW(hListSelectedFilesForCertification, LB_SETSEL, TRUE, pos);
+					LRESULT SelectedElementsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETSELCOUNT, NULL, NULL);
+					LRESULT ElementsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);
+					if (SelectedElementsCount >= 2) {
+						AppendMenuW(hMenu, MFT_STRING, IDC_DELETE_FILE, L"Удалить выбранные"); 
+						AppendMenuW(hMenu, MFT_SEPARATOR, 0, NULL);
+						AppendMenuW(hMenu, MFT_STRING, IDM_CLEAR_SELECT_IN_LIST, L"Очистить выбор");
+					}
+					else AppendMenuW(hMenu, MFT_STRING, IDC_DELETE_FILE, L"&Удалить");
+					AppendMenuW(hMenu, MFT_SEPARATOR, 0, NULL);
+					if (ElementsCount != SelectedElementsCount) { 
+						AppendMenuW(hMenu, MFT_STRING, IDM_SELECT_ALL_IN_LIST, L"Выделить всё");
+						AppendMenuW(hMenu, MFT_SEPARATOR, 0, NULL);
+					}
+					AppendMenuW(hMenu, MFT_STRING, IDM_SHOW_FILE_IN_EXPLORER, L"Показать в проводнике");
+					TrackPopupMenu(hMenu, TPM_RIGHTBUTTON |
+						TPM_TOPALIGN |
+						TPM_LEFTALIGN,
+						LOWORD(lParam),
+						HIWORD(lParam), 0, hDlg, NULL);
+					DestroyMenu(hMenu);
+				}
+			}
+			break;
 		}
 		case WM_COMMAND:
 			switch (HIWORD(wParam)) {
@@ -436,15 +494,20 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 			}
 			switch (LOWORD(wParam)) {
 				case IDM_STARTUPCONFIG: {
-					if (DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc) == IDOK) {
+					START_CONFIGURATION_RESULT SCR;
+					if (DialogBoxParamW(PS.hInst, MAKEINTRESOURCEW(IDD_START_CONFIGURATION), NULL, StartConfigurationDlgProc, (LPARAM)&SCR) == IDOK) {
 						LRESULT ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
-						if(PP.CertificateFile != L"")SendMessageW(hStatusBar, SB_SETTEXTW, MAKEWORD(1, SBT_POPOUT), (LPARAM)L"Сертификат выбран");
-						if (ItemsCount > 0 && PP.CertificateFile != L"")EnableWindow(hSign, TRUE);
+						if (SCR.CertificateFileName != L"") {
+							SendMessageW(hStatusBar, SB_SETTEXTW, MAKEWORD(1, SBT_POPOUT), (LPARAM)L"Сертификат выбран"); 
+							if (ItemsCount > 0)EnableWindow(hSign, TRUE);
+							PP.CertificateFile = SCR.CertificateFileName;
+						}
+						if (SCR.HashAlgoritmId != NULL)PP.HashAlgorithmId = SCR.HashAlgoritmId;
 					}
 					break;
 				}
 				case IDM_ABOUT: //обработка пункта меню "О программе"
-					DialogBoxW(PP.hInst, MAKEINTRESOURCEW(IDD_ABOUTBOX), hDlg, About);
+					DialogBoxW(PS.hInst, MAKEINTRESOURCEW(IDD_ABOUTBOX), hDlg, About);
 					break;
 				case IDC_SIGN:{//обработка кнопки "Подписать"
 					TSFINIT.ItemsCount = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);// получение кол-ва элементов(файлов) в списке
@@ -465,18 +528,18 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 									EPD.ToolTipCaption[0] = L"Показать пароль от сертификата";
 									EPD.ToolTipCaption[1] = L"Скрыть пароль от сертификата";
 									EPD.HasToolTip = true;
-									EPD.hIconCaption = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
+									EPD.hIconCaption = LoadIconW(PS.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
 									if (DialogBoxParamW(hBDL, MAKEINTRESOURCEW(IDDBDL_ENTERPASSWORD), NULL, BDL::EnterPasswordDlgProcW, (LPARAM)& EPD) == IDOK) {
 										LoadCertificateResult LCR = LoadCertificate(hDlg, &PP.CertificateFile, false, Password);
 										SecureZeroMemory(Password, EPD.PasswordSize);
 										LocalFree(Password);
 										if (LCR.CertificateIsLoaded) {
-											if(!PP.ConsoleIsAlloced)PP.ConsoleIsAlloced = AllocConsole();
+											if(!PS.ConsoleIsAlloced)PS.ConsoleIsAlloced = AllocConsole();
 											else {
 												FreeConsole();
-												PP.ConsoleIsAlloced = AllocConsole();
+												PS.ConsoleIsAlloced = AllocConsole();
 											}
-											if (PP.ConsoleIsAlloced == NULL)MessageError(L"Не удалось выделить консоль, отчёты о подписанных и неподписанных файлах отображаться не будут!", L"Ошибка выделения консоли!", hDlg);
+											if (PS.ConsoleIsAlloced == NULL)MessageError(L"Не удалось выделить консоль, отчёты о подписанных и неподписанных файлах отображаться не будут!", L"Ошибка выделения консоли!", hDlg);
 											else {
 												TSFINIT.hOutputConsole = GetStdHandle(STD_OUTPUT_HANDLE);
 												//hInputConsole = GetStdHandle(STD_INPUT_HANDLE);
@@ -500,9 +563,9 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 											TSFINIT.SignCertificate = LCR.pCertContext;
 											
 											//закрытия дескриптора предыдущего потока, если он не был закрыт
-											if (PP.hSignFilesThread != NULL)if(CloseHandle(PP.hSignFilesThread) == NULL)MessageError(L"Не удаллось закрыть дескриптор потока подписи файлов!", L"Ошибка закрытия дескриптора!", hDlg);
-											PP.hSignFilesThread = CreateThread(NULL, NULL, SignFilesThreadProc, (LPVOID)& TSFINIT, NULL, &ThreadSigningFilesId);//создание потока для подписи файлов
-											if (PP.hSignFilesThread == NULL) {
+											if (PS.hSignFilesThread != NULL)if(CloseHandle(PS.hSignFilesThread) == NULL)MessageError(L"Не удаллось закрыть дескриптор потока подписи файлов!", L"Ошибка закрытия дескриптора!", hDlg);
+											PS.hSignFilesThread = CreateThread(NULL, NULL, SignFilesThreadProc, (LPVOID)& TSFINIT, NULL, &ThreadSigningFilesId);//создание потока для подписи файлов
+											if (PS.hSignFilesThread == NULL) {
 												MessageError(L"Не удалось создать поток для подписи файлов! Дальнейшая подпись файлов невозможна, попробуйте повторить попытку подписи.", L"Ошибка создания потока!", hDlg); 
 												EnableWindow(hSign, TRUE);
 												EnableWindow(hClear, TRUE);
@@ -532,20 +595,20 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 					break;
 				}
 				case IDC_PAUSE_SIGNING: {//обработка кнопки приостановки подписи
-					if (PP.hSignFilesThread != NULL) {
-						DWORD result = WaitForSingleObject(PP.hSignFilesThread, 0);
+					if (PS.hSignFilesThread != NULL) {
+						DWORD result = WaitForSingleObject(PS.hSignFilesThread, 0);
 						if (result != WAIT_OBJECT_0) {
 							HWND hProgressForSigningFiles = GetDlgItem(hDlg, IDC_PROGRESS_SIGNING_FILES);
 							// the thread handle is signaled - the thread has terminated
 							if (ThreadForSigningFilesIsSuspend) {
-								ResumeThread(PP.hSignFilesThread);
+								ResumeThread(PS.hSignFilesThread);
 								ThreadForSigningFilesIsSuspend = FALSE;
 								SetWindowTextW(hPauseSigning, L"Приостановить");
 								if (hStatusBar != NULL)SendMessageW(hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Идёт подпись файлов");
 								SendMessageW(hProgressForSigningFiles, PBM_SETSTATE, PBST_NORMAL, 0);
 							}
 							else {
-								SuspendThread(PP.hSignFilesThread);
+								SuspendThread(PS.hSignFilesThread);
 								ThreadForSigningFilesIsSuspend = TRUE;
 								SetWindowTextW(hPauseSigning, L"Продолжить");
 								if (hStatusBar != NULL)SendMessageW(hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Подпись приостановлена");
@@ -558,16 +621,16 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 					break; 
 				}
 				case IDCANCEL:{//обработка кнопки "Выход"/"Отмена"
-					if (PP.hSignFilesThread != NULL) {
-						DWORD result = WaitForSingleObject(PP.hSignFilesThread, 0);
+					if (PS.hSignFilesThread != NULL) {
+						DWORD result = WaitForSingleObject(PS.hSignFilesThread, 0);
 						if (result != WAIT_OBJECT_0) {
 							// the thread handle is signaled - the thread has terminated
 							PostThreadMessageW(ThreadSigningFilesId, PARAMETERS_FOR_THREAD_SIGN_FILES::THREAD_MESSAGES::THM_CANCEL, 0, 0);
-							if (ThreadForSigningFilesIsSuspend)ResumeThread(PP.hSignFilesThread);
+							if (ThreadForSigningFilesIsSuspend)ResumeThread(PS.hSignFilesThread);
 							break;
 						}
-						if (CloseHandle(PP.hSignFilesThread) == NULL)MessageError(L"Не удаллось закрыть дескриптор потока подписи файлов!", L"Ошибка закрытия дескриптора!", hDlg);
-						else PP.hSignFilesThread = NULL;
+						if (CloseHandle(PS.hSignFilesThread) == NULL)MessageError(L"Не удаллось закрыть дескриптор потока подписи файлов!", L"Ошибка закрытия дескриптора!", hDlg);
+						else PS.hSignFilesThread = NULL;
 					}
 				}
 				case IDM_EXIT://обработка пункта меню "Выход" и кнопки закрытия окна
@@ -576,18 +639,18 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 					return (INT_PTR)TRUE;
 				}
 				case ID_CLOSE_CONSOLE: {
-					if ((PP.hSignFilesThread != NULL) && (PP.ConsoleIsAlloced == TRUE)) {
-						if (WaitForSingleObject(PP.hSignFilesThread, 0) == WAIT_OBJECT_0) {
-							if(FreeConsole() != NULL)PP.ConsoleIsAlloced = FALSE;
+					if ((PS.hSignFilesThread != NULL) && (PS.ConsoleIsAlloced == TRUE)) {
+						if (WaitForSingleObject(PS.hSignFilesThread, 0) == WAIT_OBJECT_0) {
+							if(FreeConsole() != NULL)PS.ConsoleIsAlloced = FALSE;
 							else {
 								DWORD ErrorFreeConsole = GetLastError();
 								if (ErrorFreeConsole == ERROR_INVALID_PARAMETER) {
 									MessageBoxW(hDlg, L"Не удалось выполнить освобождение консоли!\n Причина ошибки: консоль не была подключена к процессу.", L"Ошибка освобождения консоли!", MB_OK | MB_ICONERROR); 
-									PP.ConsoleIsAlloced = FALSE;
+									PS.ConsoleIsAlloced = FALSE;
 								}
 							}
-							if (CloseHandle(PP.hSignFilesThread) == NULL)MessageError(L"Не удаллось закрыть дескриптор потока подписи файлов!", L"Ошибка закрытия дескриптора!", hDlg);
-							else PP.hSignFilesThread = NULL;
+							if (CloseHandle(PS.hSignFilesThread) == NULL)MessageError(L"Не удаллось закрыть дескриптор потока подписи файлов!", L"Ошибка закрытия дескриптора!", hDlg);
+							else PS.hSignFilesThread = NULL;
 						}
 					}
 					break;
@@ -693,6 +756,55 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 					EnableWindow(hSign, FALSE);
 					EnableWindow(hClear, FALSE);
 					break;
+				case IDC_CHECK_PERFORM_ACTIONS_AFTER_SIGNING: {
+					
+					break;
+				}
+				case IDM_SHOW_FILE_IN_EXPLORER: {
+					LRESULT IndexCount = SendMessageW(hListSelectedFilesForCertification, LB_GETSELCOUNT, NULL, NULL);
+					if (IndexCount != 0) {;
+							UINTVECTOR SelectIndexs;
+							SelectIndexs.resize(IndexCount);
+							SendMessageW(hListSelectedFilesForCertification, LB_GETSELITEMS, IndexCount, (LPARAM)SelectIndexs.data());
+							for (UINT i = 0; i < IndexCount; i++) {
+								LRESULT FileNameLength = SendMessageW(hListSelectedFilesForCertification, LB_GETTEXTLEN, SelectIndexs[i], NULL);
+								if (FileNameLength != LB_ERR) {
+									WSTRING FileName;
+									FileName.resize(FileNameLength + 1);
+									if (SendMessageW(hListSelectedFilesForCertification, LB_GETTEXT, SelectIndexs[i], (LPARAM)FileName.data()) != LB_ERR) {
+										FileName = L"/select, " + FileName;
+										ShellExecuteW(NULL, NULL, L"explorer.exe", FileName.data(), NULL, SW_SHOWNORMAL);
+									}
+									else MessageError(L"Ошибка получения текста элемента в списке при обработке пункта меню \"Показать в проводнике\"", L"Ошибка при обработке пункта меню!", hDlg);
+								}
+								else MessageError(L"Ошибка при получении длинны текста элемента в списке при обработке пункта меню \"Показать в проводнике\"", L"Ошибка при обработке пункта меню!", hDlg);								
+							}
+					}
+					break;
+				}
+				case IDM_CLEAR_SELECT_IN_LIST: {
+					LRESULT CountSelectedElements = SendMessageW(hListSelectedFilesForCertification, LB_GETSELCOUNT, NULL, NULL);
+					LRESULT CountElements = SendMessageW(hListSelectedFilesForCertification, LB_GETCOUNT, NULL, NULL);
+					if (CountSelectedElements == CountElements)SendMessageW(hListSelectedFilesForCertification, LB_SETSEL, FALSE, -1);
+					else {
+						if (CountSelectedElements != 0) {
+							UINTVECTOR SelectedIndexs;
+							SelectedIndexs.resize(CountSelectedElements);
+							if (SendMessageW(hListSelectedFilesForCertification, LB_GETSELITEMS, (WPARAM)CountSelectedElements, (LPARAM)SelectedIndexs.data()) != LB_ERR) {
+								for (UINT i = 0; i < CountSelectedElements; i++) {
+									if (SendMessageW(hListSelectedFilesForCertification, LB_SETSEL, FALSE, SelectedIndexs[i]) == LB_ERR)MessageError(L"Произошла ошибка при отмене выбора элемента в списке при обработке пункта меню  \"Очистить выбор\"", L"Ошибка при обработке пункта меню!", hDlg);
+								}
+							}
+						}
+					}
+					EnableWindow(hDeleteFile, FALSE);
+					break;
+				}
+				case IDM_SELECT_ALL_IN_LIST: {
+					SendMessageW(hListSelectedFilesForCertification, LB_SETSEL, TRUE, -1);
+					break;
+				}
+				
 			}
 	}
 	return (INT_PTR)FALSE;
@@ -704,7 +816,7 @@ INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARA
 	static WSTRINGARRAY *TimeStampList = nullptr;
 	switch (message){
 		case WM_INITDIALOG: {
-			HICON hDialogIcon = LoadIconW(PP.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
+			HICON hDialogIcon = LoadIconW(PS.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
 			if (hDialogIcon == NULL)MessageError(L"Не удалось загрузить иконку для текущего диалога!", L"Ошибка загрузки иконки!", hDlg);
 			else {
 				SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
@@ -844,6 +956,55 @@ INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARA
 	}
 	return (INT_PTR)FALSE;
 }
+INT_PTR CALLBACK SettingsForActionsPerformedAfterSigningDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam){
+	static byte result = 0;
+	switch (message) {
+		case WM_INITDIALOG: {
+			HICON hDialogIcon = LoadIconW(PS.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
+			if (hDialogIcon == NULL)MessageError(L"Не удалось загрузить иконку для текущего диалога!", L"Ошибка загрузки иконки!", hDlg);
+			else {
+				SendMessageW(hDlg, WM_SETICON, ICON_BIG, (LPARAM)hDialogIcon);
+				SendMessageW(hDlg, WM_SETICON, ICON_SMALL, (LPARAM)hDialogIcon);
+			}
+			result = lParam;
+			//начало инициализации радиокнопок
+
+			return (INT_PTR)TRUE;
+		}
+		case WM_COMMAND: {	
+			switch (LOWORD(wParam)) {
+				case IDOK:
+					EndDialog(hDlg, MAKEWORD(IDOK, result));
+				case IDCANCEL:
+					EndDialog(hDlg, MAKEWORD(IDCANCEL, 0));
+					break;
+					/*
+						0b00000000 - ничего не делать
+						0b00000001 - удалить успешно подписанные файлы
+						0b00000010 - удалить недаучноподписанные файлы
+						0b00000011 - удалить все файлы
+
+					*/
+				case IDC_RADIO_DELETE_ALL_FILES_FROM_LIST:
+					result |= ProgrammSettings::COMMAND_AFTER_SIGNING_FILES::CASF_DELETE_ALL_FILES_FROM_LIST;
+					break;
+				case IDC_RADIO_DELETE_NO_SIGNING_FILES_FROM_LIST:
+					result &= ~ProgrammSettings::COMMAND_AFTER_SIGNING_FILES::CASF_DELETE_SUCCESSFULLY_SIGNED_FILES_FROM_LIST;
+					result |= ProgrammSettings::COMMAND_AFTER_SIGNING_FILES::CASF_DELETE_NOT_SUCCESSFULLY_SIGNED_FILES_FROM_LIST;
+					break;
+				case IDC_RADIO_DELETE_SIGNING_FILES_FROM_LIST:
+					result &= ~ProgrammSettings::COMMAND_AFTER_SIGNING_FILES::CASF_DELETE_NOT_SUCCESSFULLY_SIGNED_FILES_FROM_LIST;
+					result |= ProgrammSettings::COMMAND_AFTER_SIGNING_FILES::CASF_DELETE_SUCCESSFULLY_SIGNED_FILES_FROM_LIST;
+					break;
+				case IDC_RADIO_NO_MODIFY_FILES_LIST:
+					result &= ~ProgrammSettings::COMMAND_AFTER_SIGNING_FILES::CASF_DELETE_ALL_FILES_FROM_LIST;
+					break;
+			}
+			break; 
+		}
+	}
+	return (INT_PTR)FALSE;
+}
 /*INT_PTR CALLBACK MainConsoleWndProc(HWND hWnd, UINT message, WPARAM wParam, LPARAM lParam) {
 	switch(message){
 		case WM_CLOSE:
@@ -930,7 +1091,7 @@ WSTRINGARRAY OpenFiles(HWND hWnd, COMDLG_FILTERSPEC *cmf, UINT cmfSize, LPCWSTR 
 }
 LoadCertificateResult LoadCertificate(HWND hWnd, const WSTRING *CertificateHref, bool LoadCertificateFromCertStore, LPCWSTR password) {
 	LoadCertificateResult LCR;
-	if (PP.CertificateInCertStore) {
+	if (LoadCertificateFromCertStore) {
 		
 	}
 	else {
@@ -1099,18 +1260,18 @@ BOOL WINAPI ConsoleHandler(_In_ DWORD dwCtrlType)
 {
 	switch (dwCtrlType){
 		case CTRL_C_EVENT:
-			if (PP.hSignFilesThread != NULL) {
-				if (WaitForSingleObject(PP.hSignFilesThread, 0) == WAIT_OBJECT_0) {
-					if (FreeConsole() != NULL)PP.ConsoleIsAlloced = FALSE;
+			if (PS.hSignFilesThread != NULL) {
+				if (WaitForSingleObject(PS.hSignFilesThread, 0) == WAIT_OBJECT_0) {
+					if (FreeConsole() != NULL)PS.ConsoleIsAlloced = FALSE;
 					else {
 						DWORD ErrorFreeConsole = GetLastError();
 						if (ErrorFreeConsole == ERROR_INVALID_PARAMETER) {
-							MessageBoxW(PP.hRootWnd, L"Не удалось выполнить освобождение консоли!\n Причина ошибки: консоль не была подключена к процессу.", L"Ошибка освобождения консоли!", MB_OK | MB_ICONERROR);
-							PP.ConsoleIsAlloced = FALSE;
+							MessageBoxW(PS.hRootWnd, L"Не удалось выполнить освобождение консоли!\n Причина ошибки: консоль не была подключена к процессу.", L"Ошибка освобождения консоли!", MB_OK | MB_ICONERROR);
+							PS.ConsoleIsAlloced = FALSE;
 						}
 					}
-					if (CloseHandle(PP.hSignFilesThread) == NULL)MessageError(L"Не удаллось закрыть дескриптор потока подписи файлов!", L"Ошибка закрытия дескриптора!", PP.hRootWnd);
-					else PP.hSignFilesThread = NULL;
+					if (CloseHandle(PS.hSignFilesThread) == NULL)MessageError(L"Не удаллось закрыть дескриптор потока подписи файлов!", L"Ошибка закрытия дескриптора!", PS.hRootWnd);
+					else PS.hSignFilesThread = NULL;
 				}
 			}
 			else FreeConsole();
@@ -1130,6 +1291,7 @@ DWORD WINAPI SignFilesThreadProc(_In_ LPVOID lpParameter) {
 	PARAMETERS_FOR_THREAD_SIGN_FILES::PPARAMETERS_FOR_THREAD_SIGN_FILES PFSF = (PARAMETERS_FOR_THREAD_SIGN_FILES::PPARAMETERS_FOR_THREAD_SIGN_FILES)lpParameter;
 	HWND hListSelectedFilesForCertification = GetDlgItem(PFSF->hDlg, IDC_LIST_SELECTED_FILES_FOR_CERTIFICTION), hDeleteFile = GetDlgItem(PFSF->hDlg, IDC_DELETE_FILE), hModifyFile = GetDlgItem(PFSF->hDlg, IDC_MODIFY_FILE), hSign = GetDlgItem(PFSF->hDlg, IDC_SIGN), hClear = GetDlgItem(PFSF->hDlg, IDC_CLEAR), hQuitCancel = GetDlgItem(PFSF->hDlg, IDCANCEL), hProgressForSigningFiles = GetDlgItem(PFSF->hDlg, IDC_PROGRESS_SIGNING_FILES), hAddFiles = GetDlgItem(PFSF->hDlg, IDC_ADD_FILE), hPauseSigning = GetDlgItem(PFSF->hDlg, IDC_PAUSE_SIGNING);
 	SIGN_FILE_RESULT::SIGNING_FILE SF;
+	BOOL ButtonModifyFileLastStatus, ButtonDeleteFileLastStatus;
 	BOOL AnErrorHasOccurred = FALSE;
 	SF.SignCertificate = PFSF->SignCertificate;
 	MSG msg;
@@ -1142,8 +1304,8 @@ DWORD WINAPI SignFilesThreadProc(_In_ LPVOID lpParameter) {
 	//отключение необходимых элементов управления на время подписи
 	EnableWindow(hSign, FALSE);
 	EnableWindow(hClear, FALSE);
-	EnableWindow(hModifyFile, FALSE);
-	EnableWindow(hDeleteFile, FALSE);
+	ButtonModifyFileLastStatus = EnableWindow(hModifyFile, FALSE);
+	ButtonDeleteFileLastStatus = EnableWindow(hDeleteFile, FALSE);
 	EnableWindow(hAddFiles, FALSE);
 	//Включение необходимых элементов на время подписи
 	EnableWindow(hPauseSigning, TRUE);
@@ -1158,18 +1320,20 @@ DWORD WINAPI SignFilesThreadProc(_In_ LPVOID lpParameter) {
 					return 0;
 				case PARAMETERS_FOR_THREAD_SIGN_FILES::THREAD_MESSAGES::THM_CANCEL:{//данное сообщение передаётся при нажатии на кнопку отмены
 					SetWindowTextW(hQuitCancel, L"Выход");
-					HWND hConsoleWindow = (PP.ConsoleIsAlloced == TRUE ? GetConsoleWindow() : NULL);
+					HWND hConsoleWindow = (PS.ConsoleIsAlloced == TRUE ? GetConsoleWindow() : NULL);
 					if (hConsoleWindow != NULL)EnableWindowClose(hConsoleWindow);
 					EnableWindowClose(PFSF->hDlg);
 					if (PFSF->SignCertificate != NULL)CertFreeCertificateContext(PFSF->SignCertificate);
 					if (PFSF->hCertStore != NULL)CertCloseStore(PFSF->hCertStore, CERT_CLOSE_STORE_FORCE_FLAG);
 					if (PFSF->hStatusBar != NULL)SendMessageW(PFSF->hStatusBar, SB_SETTEXTW, MAKEWORD(0, SBT_POPOUT), (LPARAM)L"Подпись отменена");
-					if (PP.ConsoleIsAlloced == TRUE)FreeConsole();
+					if (PS.ConsoleIsAlloced == TRUE)FreeConsole();
 					SendMessageW(hProgressForSigningFiles, PBM_SETPOS, 0, 0);
 					EnableWindow(hSign, TRUE);
 					EnableWindow(hClear, TRUE);
-					EnableWindow(hModifyFile, TRUE);
-					EnableWindow(hDeleteFile, TRUE);
+					//возвращаем предыдущее состояние кнопок удалить и изменить
+					if (ButtonDeleteFileLastStatus == NULL)EnableWindow(hDeleteFile, TRUE);
+					if (ButtonModifyFileLastStatus == NULL)EnableWindow(hModifyFile, TRUE);
+					//конец возвращения предыдущего состояния
 					EnableWindow(hAddFiles, TRUE);
 					EnableWindow(hPauseSigning, FALSE);
 					if(PFSF->hMssign32 != NULL)FreeLibrary(PFSF->hMssign32);
@@ -1187,7 +1351,7 @@ DWORD WINAPI SignFilesThreadProc(_In_ LPVOID lpParameter) {
 				if (result.InitializationFailed) {
 					MessageBoxW(PFSF->hDlg, L"Ошибка инициализации функции SignFile, дальнейшую подпись файлов продолжить невозможно!", L"Ошибка инициализации функции SignFile", MB_OK | MB_ICONERROR);
 					MessageBoxW(PFSF->hDlg, result.ErrorInfo.ErrorString.c_str(), result.ErrorInfo.ErrorCaption.c_str(), MB_OK | MB_ICONERROR);
-					if (PP.ConsoleIsAlloced)FreeConsole();
+					if (PS.ConsoleIsAlloced)FreeConsole();
 					break;
 				}
 				if (!result.FileIsSigned) {
@@ -1272,7 +1436,7 @@ DWORD WINAPI SignFilesThreadProc(_In_ LPVOID lpParameter) {
 
 	}
 	SetWindowTextW(hQuitCancel, L"Выход");
-	HWND hConsoleWindow = (PP.ConsoleIsAlloced == TRUE ? GetConsoleWindow() : NULL);
+	HWND hConsoleWindow = (PS.ConsoleIsAlloced == TRUE ? GetConsoleWindow() : NULL);
 	if (hConsoleWindow != NULL)EnableWindowClose(hConsoleWindow);
 	EnableWindowClose(PFSF->hDlg);
 	if(PFSF->SignCertificate != NULL)CertFreeCertificateContext(PFSF->SignCertificate);
@@ -1285,8 +1449,10 @@ DWORD WINAPI SignFilesThreadProc(_In_ LPVOID lpParameter) {
 	//включение основных элементов управления, которые до начала подписи были отключены
 	EnableWindow(hSign, TRUE);
 	EnableWindow(hClear, TRUE);
-	EnableWindow(hModifyFile, TRUE);
-	EnableWindow(hDeleteFile, TRUE);
+	//возвращаем предыдущее состояние кнопок удалить и изменить
+	if (ButtonDeleteFileLastStatus == NULL)EnableWindow(hDeleteFile, TRUE);
+	if (ButtonModifyFileLastStatus == NULL)EnableWindow(hModifyFile, TRUE);
+	//конец возвращения предыдущего состояния
 	EnableWindow(hAddFiles, TRUE);
 	// отключение элементов управления, которые до начала подписи были включены
 	EnableWindow(hPauseSigning, FALSE);
@@ -1322,8 +1488,8 @@ void ProgrammSettings::LoadProgrammSettingsOfRegistry(unsigned sfLoad) {//дан
 					goto QueryValueCertificateFile;
 				}
 				else {
-					MessageBoxW(this->hRootWnd, L"Данные в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL " повреждены. Параметр CertificateFile имеет неверный тип.", L"Неверный тип параметра в реестре", MB_OK | MB_ICONERROR);
-					int ResultQuestion = MessageBoxW(this->hRootWnd, L"Восстановить повреждённый параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
+					MessageBoxW(PS.hRootWnd, L"Данные в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL " повреждены. Параметр CertificateFile имеет неверный тип.", L"Неверный тип параметра в реестре", MB_OK | MB_ICONERROR);
+					int ResultQuestion = MessageBoxW(PS.hRootWnd, L"Восстановить повреждённый параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
 					switch (ResultQuestion) {
 					case IDYES:
 						SaveProgrammSettingsInRegistry(SIGN_CERTIFICATE_FILE_NAME);
@@ -1336,8 +1502,8 @@ void ProgrammSettings::LoadProgrammSettingsOfRegistry(unsigned sfLoad) {//дан
 
 			}
 			else if (RegQueryValueResult == ERROR_FILE_NOT_FOUND) {
-				MessageBoxW(this->hRootWnd, L"Ошибка получения значения параметра CertificateFile по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL ". Такого параметра не сущевтует.", L"Ошибка получения значения", MB_OK | MB_ICONERROR);
-				int ResultQuestion = MessageBoxW(this->hRootWnd, L"Создать отсуствующий параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
+				MessageBoxW(PS.hRootWnd, L"Ошибка получения значения параметра CertificateFile по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL ". Такого параметра не сущевтует.", L"Ошибка получения значения", MB_OK | MB_ICONERROR);
+				int ResultQuestion = MessageBoxW(PS.hRootWnd, L"Создать отсуствующий параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
 				switch (ResultQuestion) {
 				case IDYES:
 					SaveProgrammSettingsInRegistry(SIGN_CERTIFICATE_FILE_NAME);
@@ -1353,11 +1519,11 @@ void ProgrammSettings::LoadProgrammSettingsOfRegistry(unsigned sfLoad) {//дан
 					else {
 						WSTRING FileHref = CertificateFileFromRegistry.data();
 						WSTRING ErrorText = L"Не удалось открыть файл сертификата по пути \"" + FileHref + "\" используя параметр CertificateFile по пути в реестре \"HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL "\" в качестве пути к файлу. Вам придётся выбрать сертификат в ручную.";
-						MessageBoxW(this->hRootWnd, ErrorText.c_str(), L"Ошибка открытия файла!", MB_OK | MB_ICONERROR);
+						MessageBoxW(PS.hRootWnd, ErrorText.c_str(), L"Ошибка открытия файла!", MB_OK | MB_ICONERROR);
 					}
 				}
 			}
-			else MessageError(L"Ошибка получения значения параметра CertificateFile из реестра по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL ".", L"Ошибка получения параметра!", this->hRootWnd, RegQueryValueResult);
+			else MessageError(L"Ошибка получения значения параметра CertificateFile из реестра по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL ".", L"Ошибка получения параметра!", PS.hRootWnd, RegQueryValueResult);
 		}
 		//Блок получения параметра AlgHash
 		if (CheckBit(sfLoad, 1)) {
@@ -1367,8 +1533,8 @@ void ProgrammSettings::LoadProgrammSettingsOfRegistry(unsigned sfLoad) {//дан
 			if (RegQueryValueResult == ERROR_SUCCESS) {
 				if (ValueType == REG_DWORD)this->HashAlgorithmId = AlgHash;
 				else {
-					MessageBoxW(this->hRootWnd, L"Данные в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL " повреждены. Параметр AlgHash имеет неверный тип.", L"Неверный тип параметра в реестре", MB_OK | MB_ICONERROR);
-					int ResultQuestion = MessageBoxW(this->hRootWnd, L"Восстановить повреждённый параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
+					MessageBoxW(PS.hRootWnd, L"Данные в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL " повреждены. Параметр AlgHash имеет неверный тип.", L"Неверный тип параметра в реестре", MB_OK | MB_ICONERROR);
+					int ResultQuestion = MessageBoxW(PS.hRootWnd, L"Восстановить повреждённый параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
 					switch (ResultQuestion) {
 					case IDYES:
 						SaveProgrammSettingsInRegistry(ALG_HASH);
@@ -1380,8 +1546,8 @@ void ProgrammSettings::LoadProgrammSettingsOfRegistry(unsigned sfLoad) {//дан
 				}
 			}
 			else if (RegQueryValueResult == ERROR_FILE_NOT_FOUND) {
-				MessageBoxW(this->hRootWnd, L"Ошибка получения значения параметра AlgHash из реестра по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL " . Такого параметра не сущевтует.", L"Ошибка получения значения", MB_OK | MB_ICONERROR);
-				int ResultQuestion = MessageBoxW(this->hRootWnd, L"Создать отсуствующий параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
+				MessageBoxW(PS.hRootWnd, L"Ошибка получения значения параметра AlgHash из реестра по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL " . Такого параметра не сущевтует.", L"Ошибка получения значения", MB_OK | MB_ICONERROR);
+				int ResultQuestion = MessageBoxW(PS.hRootWnd, L"Создать отсуствующий параметр?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
 				switch (ResultQuestion) {
 				case IDYES:
 					SaveProgrammSettingsInRegistry(ALG_HASH);
@@ -1391,12 +1557,12 @@ void ProgrammSettings::LoadProgrammSettingsOfRegistry(unsigned sfLoad) {//дан
 					break;
 				}
 			}
-			else MessageError(L"Ошибка получения значения параметра AlgHash из реестра по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL ".", L"Ошибка получения параметра!", this->hRootWnd, RegQueryValueResult);
+			else MessageError(L"Ошибка получения значения параметра AlgHash из реестра по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL ".", L"Ошибка получения параметра!", PS.hRootWnd, RegQueryValueResult);
 		}
 	}
 	else {
-		MessageError(L"Ошибка открытия ключа реестра HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL ".", L"Ошибка открытия ключа", this->hRootWnd, RegOpenKeyResult);
-		int ResultQuestion = MessageBoxW(this->hRootWnd, L"Создать данный ключ?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
+		MessageError(L"Ошибка открытия ключа реестра HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL ".", L"Ошибка открытия ключа", PS.hRootWnd, RegOpenKeyResult);
+		int ResultQuestion = MessageBoxW(PS.hRootWnd, L"Создать данный ключ?", L"Требуется ваше вмешательство", MB_YESNO | MB_ICONQUESTION);
 		switch (ResultQuestion) {
 		case IDYES:
 			SaveProgrammSettingsInRegistry(SIGN_CERTIFICATE_FILE_NAME | ALG_HASH);
@@ -1422,27 +1588,27 @@ void ProgrammSettings::SaveProgrammSettingsInRegistry(unsigned sfSave) {//дан
 				if (sfSave != NULL) {
 					if (CheckBit(sfSave, 0)) {
 						LSTATUS RegSetValueExResult = RegSetValueExW(hMainRootKey, L"CertificateFile", 0, REG_EXPAND_SZ, (BYTE*)this->CertificateFile.c_str(), (this->CertificateFile.size() + 1) * sizeof(WCHAR));
-						if (RegSetValueExResult != ERROR_SUCCESS)MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания параметра!", this->hRootWnd, RegSetValueExResult);
+						if (RegSetValueExResult != ERROR_SUCCESS)MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания параметра!", PS.hRootWnd, RegSetValueExResult);
 					}
 					if (CheckBit(sfSave, 1)) {
 						LSTATUS RegSetValueExResult = RegSetValueExW(hMainRootKey, L"AlgHash", 0, REG_DWORD, (BYTE*)& HashAlgorithmId, sizeof(HashAlgorithmId));
-						if (RegSetValueExResult != ERROR_SUCCESS)MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания параметра!", this->hRootWnd, RegSetValueExResult);
+						if (RegSetValueExResult != ERROR_SUCCESS)MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания параметра!", PS.hRootWnd, RegSetValueExResult);
 					}
 				}
 				else {
 					LSTATUS RegSetValueExResult = RegSetValueExW(hMainRootKey, L"CertificateFile", 0, REG_EXPAND_SZ, (BYTE*)this->CertificateFile.c_str(), (this->CertificateFile.size() + 1) * sizeof(WCHAR));
-					if (RegSetValueExResult != ERROR_SUCCESS)MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания параметра!", this->hRootWnd, RegSetValueExResult);
+					if (RegSetValueExResult != ERROR_SUCCESS)MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания параметра!", PS.hRootWnd, RegSetValueExResult);
 					RegSetValueExResult = RegSetValueExW(hMainRootKey, L"AlgHash", 0, REG_DWORD, (BYTE*)& HashAlgorithmId, sizeof(HashAlgorithmId));
-					if (RegSetValueExResult != ERROR_SUCCESS)MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания параметра!", this->hRootWnd, RegSetValueExResult);
+					if (RegSetValueExResult != ERROR_SUCCESS)MessageError(L"Не удалось создать параметр CertificateFile в реестре по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания параметра!", PS.hRootWnd, RegSetValueExResult);
 				}
 				CommitTransaction(hTransaction);
 				CloseHandle(hTransaction);
 			}
 		}
 		else {
-			MessageError(L"Не удалось создать/открыть ключ реестра по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания/открытия ключа", this->hRootWnd, RegCreateKeyTransactedResult);
+			MessageError(L"Не удалось создать/открыть ключ реестра по пути HKEY_CURRENT_USER\\" ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL, L"Ошибка создания/открытия ключа", PS.hRootWnd, RegCreateKeyTransactedResult);
 			CloseHandle(hTransaction);
 		}
 	}
-	else MessageError(L"Не удалось создать транзакцию для создания основной ветки реестра программы", L"Ошибка создания транзакции!", this->hRootWnd);
+	else MessageError(L"Не удалось создать транзакцию для создания основной ветки реестра программы", L"Ошибка создания транзакции!", PS.hRootWnd);
 }

@@ -21,6 +21,8 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		types.h = types.h
 	EndProjectSection
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "TestSignPolygon", "TestSignPolygon\TestSignPolygon.vcxproj", "{DE5A1A0C-5467-4E23-B678-655D3032BD8A}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|x64 = Debug|x64
@@ -53,6 +55,14 @@ Global
 		{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}.Release|x64.Build.0 = Release|x64
 		{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}.Release|x86.ActiveCfg = Release|Win32
 		{D8AB9405-38DD-42FE-B7E4-B39F2F213B3D}.Release|x86.Build.0 = Release|Win32
+		{DE5A1A0C-5467-4E23-B678-655D3032BD8A}.Debug|x64.ActiveCfg = Debug|x64
+		{DE5A1A0C-5467-4E23-B678-655D3032BD8A}.Debug|x64.Build.0 = Debug|x64
+		{DE5A1A0C-5467-4E23-B678-655D3032BD8A}.Debug|x86.ActiveCfg = Debug|Win32
+		{DE5A1A0C-5467-4E23-B678-655D3032BD8A}.Debug|x86.Build.0 = Debug|Win32
+		{DE5A1A0C-5467-4E23-B678-655D3032BD8A}.Release|x64.ActiveCfg = Release|x64
+		{DE5A1A0C-5467-4E23-B678-655D3032BD8A}.Release|x64.Build.0 = Release|x64
+		{DE5A1A0C-5467-4E23-B678-655D3032BD8A}.Release|x86.ActiveCfg = Release|Win32
+		{DE5A1A0C-5467-4E23-B678-655D3032BD8A}.Release|x86.Build.0 = Release|Win32
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
