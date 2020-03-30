@@ -1,6 +1,6 @@
 ﻿//{{NO_DEPENDENCIES}}
 // Включаемый файл, созданный в Microsoft Visual C++.
-// Используется SignProjectTool.rc
+// Используется везде где нужны идентификаторы ресурсов
 //
 #define IDC_MYICON                      2
 #define IDD_SIGNPROJECTTOOL_DIALOG      102
@@ -28,15 +28,12 @@
 #define IDC_LIST_SELECTED_FILES_FOR_CERTIFICTION 1005
 #define IDC_ADD_FILE                    1006
 #define IDC_DELETE_FILE                 1007
-#define IDC_PROGRESS1                   1008
 #define IDC_PROGRESS_SIGNING_FILES      1008
 #define IDC_MODIFY_FILE                 1009
 #define IDC_SIGN                        1010
-#define IDC_BUTTON2                     1012
 #define IDC_CLEAR                       1012
 #define IDC_BUTTON_SETTINGSTIMESTAMP    1012
 #define IDC_ABOUTICON                   1013
-#define IDC_EDIT1                       1014
 #define IDC_EDIT_TIMESTAMP_SERVER       1014
 #define IDC_COMBO1                      1015
 #define IDC_LIST_TIMESTAMP_SERVERS      1017
@@ -45,18 +42,14 @@
 #define IDC_CLEAR_INPUT                 1021
 #define IDC_CLEAR_TIMESTAMP_SERVERS     1023
 #define IDC_BUTTON_SELECT_CERTIFICATE_FROM_STORE 1024
-#define IDC_COMBO2                      1025
 #define IDC_COMBOX_LISTCERT_FILES       1026
-#define IDC_BUTTON1                     1027
 #define IDC_PAUSE_SIGNING               1027
 #define IDC_ITEMS_COUNT                 1028
 #define IDC_RADIO_DELETE_NO_SIGNING_FILES_FROM_LIST 1031
 #define IDC_RADIO_DELETE_ALL_FILES_FROM_LIST 1032
 #define IDC_RADIO_DELETE_SIGNING_FILES_FROM_LIST 1033
 #define IDC_RADIO_NO_MODIFY_FILES_LIST  1034
-#define IDC_CHECK1                      1035
 #define IDC_CHECK_PERFORM_ACTIONS_AFTER_SIGNING 1035
-#define ID_32771                        32771
 #define IDM_STARTUPCONFIG               32772
 #define ID_CLOSE_CONSOLE                32773
 #define IDC_STATIC                      -1

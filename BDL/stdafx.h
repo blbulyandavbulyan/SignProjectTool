@@ -13,7 +13,7 @@
 // Файлы заголовков Windows
 #include <windows.h>
 #include <CommCtrl.h>
-#include "../types.h"
+#include "../WWS/types.h"
 #ifdef BDL_EXPORTS
 extern HMODULE hThisDll;
 #endif

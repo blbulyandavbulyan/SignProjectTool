@@ -7,7 +7,6 @@
 #define IDI_EYE_NOT_VISIBLE             104
 #define IDC_ENTERPASSWORDDLG_EDIT_PASSWORD 1001
 #define IDC_ENTERPASSWORDDLG_SHOW_PASSWORD 1002
-#define IDC_BUTTON1                     1003
 #define IDC_DBL_ENTERPASSWORDCLEAR      1003
 
 // Next default values for new objects

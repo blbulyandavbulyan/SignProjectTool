@@ -1,87 +1,46 @@
 ﻿#pragma once
+#include "resource.h"
+//структура с основными параметрами программы
+#define DEFUAULT_SIGN_HASH_ALGORITHM CALG_SHA_256//макрос определяющий алгоритм хэширования по умолчанию при подписи
+#define ROOT_REGISTRY_KEY_SIGNPROJECT_TOOL L"Software\\Blbulyan Software\\SignProjectTool"//Макрос, определяющий корневую ветку в реестре для данной программы, он будет использоваться относительно HKEY_CURRENT_USER
+struct ProgrammSettings {
+	void SaveProgrammSettingsInRegistry(unsigned sfSave);//данная функция преназначена для сохранения параметров программы в реестр Windows
+	void LoadProgrammSettingsOfRegistry(unsigned sfLoad);//данная функция предназначена для загрузки параметров программы из реестра Windows
+	enum REGISTRY_QUERY { SIGN_CERTIFICATE_FILE_NAME = 0b00000001, ALG_HASH = 0b00000010 };//перечисление, оперделяющее флаги, комбинация которых передаётся вышеописанным функциям, они позволяют задать какие параметры следует (загружать из реестра)/(сохранять в реестре)
+	//флаги комбинировать с помощью операции побитового ИЛИ, пример вызова LoadProgrammSettingsOfRegistry с заданными параметрами:
+	//LoadProgrammSettingsOfRegistry(SIGN_CERTIFICATE_FILE_NAME | ALG_HASH) - функция загрузит два параметра из реестра, путь к сертификату и алгоритм хеша
+	//LoadProgrammSettingsOfRegistry(SIGN_CERTIFICATE_FILE_NAME) - функция загрузит только полный путь к сертификату
+	//LoadProgrammSettingsOfRegistry(ALG_HASH) - функция загрузит только алгоритм хеширования
+	//соотвственно флаг SIGN_CERTIFICATE_FILE_NAME - предназначен для загрузки полного пути к сертификату для подписи из реестра Windows,
+	//а флаг ALG_HASH - предназначен для загрузки алгоритма хеширования из реестра Windows
+	enum COMMAND_AFTER_SIGNING_FILES {
+		CASF_DELETE_SUCCESSFULLY_SIGNED_FILES_FROM_LIST = 0b0000000000000001,
+		CASF_DELETE_NOT_SUCCESSFULLY_SIGNED_FILES_FROM_LIST = 0b0000000000000010,
+		CASF_DELETE_ALL_FILES_FROM_LIST = 0b0000000000000011
+	};
+	/*
+		Команды, которые могут быть выполнены над списком:
+			0bxxxxxx00 - ничего не удалять из списка
+			0bxxxxxxx1 - удалить успешно подписанные файлы из списка
+			0b00000010 - удалить недаучноподписанные файлы из списка
+			0bxxxxxx11 - удалить все файлы из списка
 
-#include "resource.h"/*
-class Toolbar{
-public:
-	Toolbar(HWND hParent, HINSTANCE hInst, );
-	~Toolbar(void);
-
-	int     addButton(int id, int bmpRes, unsigned char fsStyle = BTNS_BUTTON, unsigned char fsState = TBSTATE_ENABLED);
-	int     addSeparetor(unsigned char fsState = TBSTATE_ENABLED);
-	void    OnResize(int w, int h);
-
-private:
-	void    CreateToolBar(HWND hParent, HINSTANCE hInst);
-
-	HIMAGELIST  myimg;
-	HWND hToolBarWnd = NULL;
-	HWND hParent = NULL;
+	*/
+	WSTRINGARRAY FilesForCertification;//список файлов для подписи
+	WSTRING CertificateFile;// имя файла сертификата для подписи им
+	WSTRINGARRAY HttpTimeStampServers;//список TimeStamp серверов
+	static const WSTRINGARRAY CommandLineValidArguments;//массив с допустимыми аргументами командной строки
+	bool CertificateInCertStore = false;//хранится ли сертификат, которым будут подписываться файлы в хранилище сертификатов (задаётся при начальной настройке программы
+	ALG_ID HashAlgorithmId = DEFUAULT_SIGN_HASH_ALGORITHM;//алгоритм хеширования при подписи поумолчанию
+	bool LoadSettingsFromRegistry = true;//загружать настройки из реестра Windows
+	bool SaveSettingsInRegistry = true;//сохранять настройки в реестр Windows
+	WORD CommandToExecuteAfterSigningFiles = 0;//команда для исполнения после подписи файлов
 };
-Toolbar::Toolbar(HWND hParent)
-{
-	CreateToolBar(hParent);
-}
-
-Toolbar::~Toolbar(void)
-{
-	ImageList_Destroy(myimg);
-}
-
-void Toolbar::CreateToolBar(HWND hParent, HINSTANCE hInst)
-{
-	const int bitmapSize = 16;
-
-	// Create the toolbar.
-	hToolBarWnd = CreateWindowEx(0, TOOLBARCLASSNAME, NULL,
-		WS_CHILD | TBSTYLE_WRAPABLE | CCS_NODIVIDER | TBSTYLE_TOOLTIPS, // Styles
-		0, 0, 0, 0, hParent, NULL, Window::hModule, NULL);
-
-	if (!handle) {
-		MessageBox(0, TEXT("Failed to create a tool bar"), TEXT("NULL"), MB_OK | MB_ICONERROR);
-		return;
-	}
-
-	SendMessage(handle, TB_BUTTONSTRUCTSIZE, (WPARAM)sizeof(TBBUTTON), 0);
-
-	if (!(myimg = ImageList_Create(bitmapSize, bitmapSize, ILC_COLOR24 | ILC_MASK, 1, 16)))
-		return;
-
-	SendMessage(handle, TB_SETIMAGELIST, (WPARAM)0, (LPARAM)myimg);
-
-	SendMessage(handle, TB_SETBUTTONSIZE, 0, MAKELPARAM(bitmapSize, bitmapSize));
-	ShowWindow(handle, SW_SHOWNORMAL);
-}
-
-int Toolbar::addButton(int id, int bmpRes, unsigned char fsStyle, unsigned char fsState)
-{
-	HBITMAP hBmp = LoadBitmap(Window::hModule, MAKEINTRESOURCE(bmpRes));
-	int index = ImageList_AddMasked(myimg, hBmp, RGB(255, 255, 255));
-	DeleteObject(hBmp);
-
-	TBBUTTON tbutton = { 0 };
-	tbutton.idCommand = id;
-	tbutton.iBitmap = index;
-	tbutton.fsState = fsState;
-	tbutton.fsStyle = fsStyle;
-
-	if (SendMessage(handle, TB_INSERTBUTTON, (WPARAM)0, (LPARAM)& tbutton))
-		return index;
-
-	return -1;
-}
-
-int Toolbar::addSeparetor(unsigned char fsState)
-{
-	TBBUTTON tbutton = { 0 };
-	tbutton.idCommand = 0;
-	tbutton.iBitmap = 0;
-	tbutton.fsState = fsState;
-	tbutton.fsStyle = BTNS_SEP;
-
-	return (int)SendMessage(handle, TB_INSERTBUTTON, (WPARAM)0, (LPARAM)& tbutton);
-}
-
-void Toolbar::OnResize(int w, int h)
-{
-	SendMessage(handle, TB_AUTOSIZE, 0, 0);
-}*/
+//структура описывающая элементы рантайма, состояние программы в рантайме, данные в ней могут менятся в зависимости от запуска к запуску
+struct ProgrammStatement {
+	HINSTANCE hInst = NULL;//экземпляр приложения
+	WNDPROC DefaultConsoleWindowProc = NULL;//процедура консоли по умолчанию(возможно не используется)
+	HANDLE hSignFilesThread = nullptr;//дескриптор этого потока
+	BOOL ConsoleIsAlloced = FALSE;//выделена ли консоль
+	HWND hRootWnd = NULL;//дескриптор главного окна
+};
