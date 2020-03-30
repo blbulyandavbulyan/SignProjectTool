@@ -1,4 +1,7 @@
 #include "stdafx.h"
+/***************************************************************************************
+***ƒанный заголовок содержит реализацию диалоговых процедур объ€€вленных в dlgprocs.h***
+****************************************************************************************/
 extern ProgrammStatement PS;
 //процедура обработки сообщений диалогового окна настройки TimeStamp серверов IDD_SETTINGS_TIMESTAMP_SERVERS
 INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam) {
