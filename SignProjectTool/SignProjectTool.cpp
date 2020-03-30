@@ -22,9 +22,9 @@ struct ProgrammSettings {
 	//соотвственно флаг SIGN_CERTIFICATE_FILE_NAME - предназначен для загрузки полного пути к сертификату для подписи из реестра Windows,
 	//а флаг ALG_HASH - предназначен для загрузки алгоритма хеширования из реестра Windows
 	enum COMMAND_AFTER_SIGNING_FILES {
-		CASF_DELETE_SUCCESSFULLY_SIGNED_FILES_FROM_LIST = 0b00000001,
-		CASF_DELETE_NOT_SUCCESSFULLY_SIGNED_FILES_FROM_LIST = 0b00000010,
-		CASF_DELETE_ALL_FILES_FROM_LIST = 0b00000011
+		CASF_DELETE_SUCCESSFULLY_SIGNED_FILES_FROM_LIST = 0b0000000000000001,
+		CASF_DELETE_NOT_SUCCESSFULLY_SIGNED_FILES_FROM_LIST = 0b0000000000000010,
+		CASF_DELETE_ALL_FILES_FROM_LIST = 0b0000000000000011
 	};
 	/*
 		Команды, которые могут быть выполнены над списком:
@@ -42,7 +42,7 @@ struct ProgrammSettings {
 	ALG_ID HashAlgorithmId = CALG_SHA_256;//алгоритм хеширования при подписи поумолчанию
 	bool LoadSettingsFromRegistry = true;//загружать настройки из реестра Windows
 	bool SaveSettingsInRegistry = true;//сохранять настройки в реестр Windows
-	byte CommandToExecuteAfterSigningFiles = 0b00000000;//команда для исполнения после подписи файлов
+	WORD CommandToExecuteAfterSigningFiles = 0;//команда для исполнения после подписи файлов
 	
 
 } PP;
@@ -757,7 +757,13 @@ INT_PTR CALLBACK AddFilesForCertificationDlgProc(HWND hDlg, UINT message, WPARAM
 					EnableWindow(hClear, FALSE);
 					break;
 				case IDC_CHECK_PERFORM_ACTIONS_AFTER_SIGNING: {
-					
+					if (IsDlgButtonChecked(hDlg, IDC_CHECK_PERFORM_ACTIONS_AFTER_SIGNING)) {
+						INT_PTR ResultDialog = DialogBoxParamW(PS.hInst, MAKEINTRESOURCEW(IDD_SETTINGS_FOR_ACTIONS_PERFORMED_AFTER_SIGNING), hDlg, SettingsForActionsPerformedAfterSigningDlgProc, PP.CommandToExecuteAfterSigningFiles);
+						if (HIWORD(ResultDialog) == IDOK) {
+							PP.CommandToExecuteAfterSigningFiles = LOWORD(ResultDialog);
+						}
+					}
+					else PP.CommandToExecuteAfterSigningFiles = 0;
 					break;
 				}
 				case IDM_SHOW_FILE_IN_EXPLORER: {
@@ -957,7 +963,7 @@ INT_PTR CALLBACK SettingsTimeStampsServersDlgProc(HWND hDlg, UINT message, WPARA
 	return (INT_PTR)FALSE;
 }
 INT_PTR CALLBACK SettingsForActionsPerformedAfterSigningDlgProc(HWND hDlg, UINT message, WPARAM wParam, LPARAM lParam){
-	static byte result = 0;
+	static WORD result = 0;
 	switch (message) {
 		case WM_INITDIALOG: {
 			HICON hDialogIcon = LoadIconW(PS.hInst, MAKEINTRESOURCEW(IDI_SIGNPROJECTTOOL));
@@ -968,15 +974,20 @@ INT_PTR CALLBACK SettingsForActionsPerformedAfterSigningDlgProc(HWND hDlg, UINT 
 			}
 			result = lParam;
 			//начало инициализации радиокнопок
-
+			if (result & ProgrammSettings::COMMAND_AFTER_SIGNING_FILES::CASF_DELETE_ALL_FILES_FROM_LIST == ProgrammSettings::COMMAND_AFTER_SIGNING_FILES::CASF_DELETE_ALL_FILES_FROM_LIST)CheckDlgButton(hDlg, IDC_RADIO_DELETE_ALL_FILES_FROM_LIST, BST_CHECKED);
+			else {
+				if (result & ProgrammSettings::COMMAND_AFTER_SIGNING_FILES::CASF_DELETE_NOT_SUCCESSFULLY_SIGNED_FILES_FROM_LIST)CheckDlgButton(hDlg, IDC_RADIO_DELETE_NO_SIGNING_FILES_FROM_LIST, BST_CHECKED);
+				if (result & ProgrammSettings::COMMAND_AFTER_SIGNING_FILES::CASF_DELETE_SUCCESSFULLY_SIGNED_FILES_FROM_LIST)CheckDlgButton(hDlg, IDC_RADIO_DELETE_SIGNING_FILES_FROM_LIST, BST_CHECKED);
+			}
+			
 			return (INT_PTR)TRUE;
 		}
 		case WM_COMMAND: {	
 			switch (LOWORD(wParam)) {
 				case IDOK:
-					EndDialog(hDlg, MAKEWORD(IDOK, result));
+					EndDialog(hDlg, MAKELONG(IDOK, result));
 				case IDCANCEL:
-					EndDialog(hDlg, MAKEWORD(IDCANCEL, 0));
+					EndDialog(hDlg, MAKELONG(IDCANCEL, 0));
 					break;
 					/*
 						0b00000000 - ничего не делать

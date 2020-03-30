@@ -72,15 +72,19 @@
   <PropertyGroup Label="UserMacros" />
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <LinkIncremental>true</LinkIncremental>
+    <OutDir>$(SolutionDir)$(PlatformShortName)\$(Configuration)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|x64'">
     <LinkIncremental>true</LinkIncremental>
+    <OutDir>$(SolutionDir)$(PlatformShortName)\$(Configuration)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
     <LinkIncremental>false</LinkIncremental>
+    <OutDir>$(SolutionDir)$(PlatformShortName)\$(Configuration)\</OutDir>
   </PropertyGroup>
   <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|x64'">
     <LinkIncremental>false</LinkIncremental>
+    <OutDir>$(SolutionDir)$(PlatformShortName)\$(Configuration)\</OutDir>
   </PropertyGroup>
   <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
     <ClCompile>
@@ -95,7 +99,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalOptions>/EXPORT:EnterPasswordDlgProcW=EnterPasswordDlgProcW %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>$(SolutionDir)$(Configuration)\WWS.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <PreprocessorDefinitions>BDL_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -114,7 +118,7 @@
       <SubSystem>Windows</SubSystem>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalOptions>/EXPORT:EnterPasswordDlgProcW=EnterPasswordDlgProcW %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>$(SolutionDir)x64\$(Configuration)\WWS.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <PreprocessorDefinitions>BDL_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -137,7 +141,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalOptions>/EXPORT:EnterPasswordDlgProcW=EnterPasswordDlgProcW %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>$(SolutionDir)$(Configuration)\WWS.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <PreprocessorDefinitions>BDL_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
@@ -160,7 +164,7 @@
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>true</GenerateDebugInformation>
       <AdditionalOptions>/EXPORT:EnterPasswordDlgProcW=EnterPasswordDlgProcW %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>$(SolutionDir)x64\$(Configuration)\WWS.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>%(AdditionalDependencies)</AdditionalDependencies>
     </Link>
     <ResourceCompile>
       <PreprocessorDefinitions>BDL_EXPORTS;%(PreprocessorDefinitions)</PreprocessorDefinitions>

@@ -152,7 +152,7 @@ BDLDLL_API INT_PTR CALLBACK BDL::EnterPasswordDlgProcW(HWND hDlg, UINT message, 
 					break;
 				}
 				case IDC_DBL_ENTERPASSWORDCLEAR:
-					SetDlgItemTextA(hDlg, IDC_ENTERPASSWORDDLG_EDIT_PASSWORD, "");
+					SetDlgItemTextW(hDlg, IDC_ENTERPASSWORDDLG_EDIT_PASSWORD, L"");
 					break;
 			}
 	}
